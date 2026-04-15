@@ -81,12 +81,7 @@ export function LoginForm() {
         </p>
       )}
 
-      <Button
-        type="submit"
-        size={"lg"}
-        variant={"keycap"}
-        disabled={isSubmitting}
-      >
+      <Button type="submit" size={"lg"} disabled={isSubmitting}>
         {isSubmitting ? "Signing in..." : "Sign in"}
       </Button>
     </form>

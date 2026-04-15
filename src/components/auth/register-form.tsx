@@ -115,12 +115,7 @@ export function RegisterForm() {
         </p>
       )}
 
-      <Button
-        type="submit"
-        size={"lg"}
-        variant={"keycap"}
-        disabled={isSubmitting}
-      >
+      <Button type="submit" size={"lg"} disabled={isSubmitting}>
         {isSubmitting ? "Creating account..." : "Register"}
       </Button>
     </form>
