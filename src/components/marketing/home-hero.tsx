@@ -75,7 +75,7 @@ const HERO_FEATURES: HeroFeature[] = [
         <Input
           id="room-code-input"
           placeholder="Enter code"
-          className="h-11 flex-1 font-semibold border-lavender-foreground/20 bg-lavender-foreground/10 text-lavender-foreground placeholder:text-lavender-foreground/50 focus-visible:border-lavender-foreground/40 focus-visible:ring-lavender-foreground/15"
+          className="h-11 flex-1 border-lavender-foreground/20 bg-lavender-foreground/10 text-lavender-foreground placeholder:text-lavender-foreground/50 focus-visible:border-lavender-foreground/40 focus-visible:ring-lavender-foreground/15"
         />
         <Button
           type="submit"
@@ -133,24 +133,10 @@ export function HomeHero() {
   return (
     <MaxWidthWrapper className="flex flex-col items-center gap-10 text-center sm:gap-14">
       {/* Headline */}
-      <div className="relative flex flex-col items-center gap-6">
-        {/* Blobs */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-16 -left-24 size-64 rounded-full bg-lavender opacity-40 blur-3xl"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-8 -right-24 size-56 rounded-full bg-violet opacity-20 blur-3xl"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute top-8 left-1/2 size-48 -translate-x-1/2 rounded-full bg-amber opacity-25 blur-3xl"
-        />
-
+      <div className="flex flex-col items-center gap-6">
         <h1
           id="hero-title"
-          className="relative text-balance text-center text-3xl font-semibold sm:text-4xl md:text-5xl lg:text-6xl"
+          className="relative text-balance text-center text-4xl font-semibold sm:text-5xl lg:text-6xl"
         >
           Play <span className="text-violet">trivia</span> with <br /> your
           friends
@@ -176,8 +162,8 @@ export function HomeHero() {
               </CardHeader>
 
               {/* Title + description */}
-              <CardContent className="flex flex-col gap-3 text-left">
-                <CardTitle className="text-3xl sm:text-4xl leading-[1.05]">
+              <CardContent className="flex flex-1 flex-col gap-3 text-left">
+                <CardTitle className="text-3xl font-semibold leading-[1.05] sm:text-4xl">
                   {feature.title}
                 </CardTitle>
 
