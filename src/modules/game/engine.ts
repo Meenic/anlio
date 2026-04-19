@@ -183,12 +183,24 @@ export async function endGame(roomId: string) {
     data: { players: finalPlayers },
   });
 
-  await db.insert(gameResults).values({
-    id: nanoid(),
-    roomId,
-    players: finalPlayers,
-    settings: room.settings,
-  });
+  // Persist results BEFORE deleting the room so a DB failure leaves
+  // recoverable state in Redis rather than silently destroying it.
+  try {
+    await db.insert(gameResults).values({
+      id: nanoid(),
+      roomId,
+      players: finalPlayers,
+      settings: room.settings,
+    });
+  } catch (error) {
+    console.error(
+      `[engine] Failed to persist gameResults for room=${roomId} ` +
+        `(players=${finalPlayers.length}, phase=ended). Room retained in ` +
+        `Redis for manual recovery.`,
+      error
+    );
+    return; // Do NOT delete the room — leave it for retry / investigation.
+  }
 
   await deleteRoom(roomId);
 }

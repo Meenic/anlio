@@ -41,6 +41,9 @@ export async function tryUpdateRoom(
 }
 
 export function toPublicState(internalState: InternalRoomState): RoomState {
-  const { questions, answers, ...publicState } = internalState;
-  return publicState;
+  const { questions: _q, answers, ...publicState } = internalState;
+  return {
+    ...publicState,
+    answerCount: Object.keys(answers).length,
+  };
 }

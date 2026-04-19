@@ -36,10 +36,14 @@ export type RoomState = {
   currentQuestionIndex: number;
   phaseEndsAt: number | null; // epoch ms — when current phase timer expires
   createdAt: number;
+  /** Aggregate number of players who have answered the current question.
+   *  Safe to expose — does NOT leak who answered what. */
+  answerCount: number;
 };
 
-// PRIVATE STATE
-export type InternalRoomState = RoomState & {
+// PRIVATE STATE — persisted in Redis. `answerCount` is derived from `answers`
+// in `toPublicState` and therefore omitted here to avoid a duplicate source of truth.
+export type InternalRoomState = Omit<RoomState, 'answerCount'> & {
   questions: Question[];
   answers: Record<string, string>;
 };
