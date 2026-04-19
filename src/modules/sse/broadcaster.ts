@@ -1,11 +1,12 @@
 import { registry } from './registry';
 import type { SSEEvent } from './types';
 
+const encoder = new TextEncoder();
+
 export function broadcast(roomId: string, event: SSEEvent) {
   const clients = registry.get(roomId);
   if (!clients) return;
 
-  const encoder = new TextEncoder();
   const chunk = encoder.encode(
     `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
   );
@@ -27,7 +28,6 @@ export function sendToPlayer(
   const controller = registry.get(roomId)?.get(playerId);
   if (!controller) return;
 
-  const encoder = new TextEncoder();
   try {
     controller.enqueue(
       encoder.encode(
