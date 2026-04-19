@@ -12,11 +12,7 @@ export const RoomSettingsSchema = z.object({
     z.literal(15),
     z.literal(20),
   ]),
-  timePerQuestion: z.union([
-    z.literal(10),
-    z.literal(20),
-    z.literal(30),
-  ]),
+  timePerQuestion: z.union([z.literal(10), z.literal(20), z.literal(30)]),
   category: z.string().min(1).max(32),
   isPublic: z.boolean(),
 });

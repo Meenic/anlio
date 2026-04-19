@@ -32,9 +32,7 @@ export async function POST(
     }
 
     // Every connected non-host player must be ready. Host is implicitly ready.
-    const pending = connected.filter(
-      (p) => p.id !== room.hostId && !p.ready
-    );
+    const pending = connected.filter((p) => p.id !== room.hostId && !p.ready);
     if (pending.length > 0) {
       return jsonError(409, 'not_all_ready');
     }
