@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { MaxWidthWrapper } from "../layout/max-width-wrapper";
+import { MaxWidthWrapper } from '../layout/max-width-wrapper';
 import {
   Card,
   CardHeader,
@@ -8,12 +8,12 @@ import {
   CardTitle,
   CardDescription,
   CardFooter,
-} from "../ui/card";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Plus, DoorOpen, Trophy, ChevronRight } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+} from '../ui/card';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Plus, DoorOpen, Trophy, ChevronRight } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 interface HeroFeature {
   id: string;
@@ -31,7 +31,7 @@ interface HeroFeature {
 
 const HERO_FEATURES: HeroFeature[] = [
   {
-    id: "create-room",
+    id: 'create-room',
     icon: Plus,
     title: (
       <>
@@ -40,10 +40,10 @@ const HERO_FEATURES: HeroFeature[] = [
       </>
     ),
     description:
-      "Start a new trivia room and invite your friends to play together.",
+      'Start a new trivia room and invite your friends to play together.',
     footer: (
       <Button
-        size={"lg"}
+        size={'lg'}
         className="h-11 w-full bg-violet-foreground/90 text-violet font-semibold hover:bg-violet-foreground/75"
       >
         Create a Room
@@ -51,14 +51,14 @@ const HERO_FEATURES: HeroFeature[] = [
       </Button>
     ),
     colors: {
-      card: "bg-violet",
-      foreground: "text-violet-foreground",
-      iconBadge: "bg-white/15 text-violet-foreground",
-      accent: "text-violet-accent",
+      card: 'bg-violet',
+      foreground: 'text-violet-foreground',
+      iconBadge: 'bg-white/15 text-violet-foreground',
+      accent: 'text-violet-accent',
     },
   },
   {
-    id: "join-room",
+    id: 'join-room',
     icon: DoorOpen,
     title: (
       <>
@@ -66,7 +66,7 @@ const HERO_FEATURES: HeroFeature[] = [
         <em className="not-italic font-extrabold">Room</em>
       </>
     ),
-    description: "Got a room code? Jump right in and play with others.",
+    description: 'Got a room code? Jump right in and play with others.',
     footer: (
       <form
         className="flex w-full items-center gap-2"
@@ -79,7 +79,7 @@ const HERO_FEATURES: HeroFeature[] = [
         />
         <Button
           type="submit"
-          size={"lg"}
+          size={'lg'}
           className="h-11 bg-lavender-foreground text-lavender font-semibold hover:bg-lavender-foreground/85"
         >
           Join
@@ -87,14 +87,14 @@ const HERO_FEATURES: HeroFeature[] = [
       </form>
     ),
     colors: {
-      card: "bg-lavender",
-      foreground: "text-lavender-foreground",
-      iconBadge: "bg-lavender-foreground/10 text-lavender-foreground",
-      accent: "text-lavender-accent",
+      card: 'bg-lavender',
+      foreground: 'text-lavender-foreground',
+      iconBadge: 'bg-lavender-foreground/10 text-lavender-foreground',
+      accent: 'text-lavender-accent',
     },
   },
   {
-    id: "leaderboard",
+    id: 'leaderboard',
     icon: Trophy,
     title: (
       <>
@@ -121,10 +121,10 @@ const HERO_FEATURES: HeroFeature[] = [
       </div>
     ),
     colors: {
-      card: "bg-amber",
-      foreground: "text-amber-foreground",
-      iconBadge: "bg-amber-foreground/10 text-amber-foreground",
-      accent: "text-amber-accent",
+      card: 'bg-amber',
+      foreground: 'text-amber-foreground',
+      iconBadge: 'bg-amber-foreground/10 text-amber-foreground',
+      accent: 'text-amber-accent',
     },
   },
 ];
