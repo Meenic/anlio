@@ -1,5 +1,5 @@
-import { QuestionPayload, RevealPayload } from '@/modules/game/types';
-import { Player, RoomSettings, RoomState } from '@/modules/room/types';
+import type { QuestionPayload, RevealPayload } from '@/modules/game/types';
+import type { Player, RoomSettings, RoomState } from '@/modules/room/types';
 
 export type SSEEvent =
   | { event: 'state_sync'; data: RoomState }
