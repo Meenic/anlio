@@ -1,7 +1,7 @@
 import { registerClient, unregisterClient } from '@/modules/sse/registry';
 import { getRoom, toPublicState, tryUpdateRoom } from '@/modules/room/store';
 import { broadcast, pingClient, sendToPlayer } from '@/modules/sse/broadcaster';
-import { auth } from '@/lib/auth';
+import { requireAuth } from '@/lib/api/validate';
 
 /** Heartbeat interval in ms. Short enough to catch dead sockets quickly,
  *  long enough not to waste bandwidth. */
@@ -16,11 +16,9 @@ export async function GET(
   // --- SECURITY: identity is derived from the verified server session, NOT
   // from client-supplied query params. Otherwise anyone who knows a room id
   // could impersonate any player in that room. ---
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session?.user?.id) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-  const playerId = session.user.id;
+  const authResult = await requireAuth(request).catch((e) => e as Response);
+  if (authResult instanceof Response) return authResult;
+  const playerId = authResult.id;
 
   // The player must already exist in the room (added via the join/create flow).
   // Refuse otherwise to avoid creating ghost player entries in Redis.
@@ -51,17 +49,27 @@ export async function GET(
         unregisterClient(roomId, playerId);
 
         // Best-effort: room may already be deleted by endGame.
-        const updated = await tryUpdateRoom(roomId, (room) => ({
-          ...room,
-          players: {
-            ...room.players,
-            [playerId]: { ...room.players[playerId], connected: false },
-          },
-        }));
+        // The `if (!room.players[playerId])` guard is CRITICAL for the kick
+        // and leave flows — those routes remove the player entry before this
+        // cleanup runs, and without the guard we'd spread `undefined` and
+        // resurrect the player as `{ connected: false }`, also triggering a
+        // spurious `player_left` broadcast right after `player_kicked`.
+        const updated = await tryUpdateRoom(roomId, (room) => {
+          if (!room.players[playerId]) return room;
+          return {
+            ...room,
+            players: {
+              ...room.players,
+              [playerId]: { ...room.players[playerId], connected: false },
+            },
+          };
+        });
 
         // Broadcast so remaining clients can update presence UI AND so the
         // engine's all-answered check doesn't deadlock on a ghost player.
-        if (updated) {
+        // Skip if the player was already removed (kicked/left) — the
+        // corresponding route has already broadcast the right event.
+        if (updated && updated.players[playerId]) {
           const count = Object.values(updated.players).filter(
             (p) => p.connected
           ).length;

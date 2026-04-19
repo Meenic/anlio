@@ -3,6 +3,7 @@ import type { InternalRoomState, RoomState } from './types';
 
 const TTL = 60 * 60 * 2; // 2 hours
 export const roomKey = (id: string) => `room:${id}`;
+export const codeKey = (code: string) => `code:${code}`;
 
 export async function getRoom(id: string): Promise<InternalRoomState | null> {
   return redis.get<InternalRoomState>(roomKey(id));
@@ -46,4 +47,20 @@ export function toPublicState(internalState: InternalRoomState): RoomState {
     ...publicState,
     answerCount: Object.keys(answers).length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Code -> roomId index (used by join-by-code)
+// ---------------------------------------------------------------------------
+
+export async function setRoomCode(code: string, roomId: string): Promise<void> {
+  await redis.set(codeKey(code), roomId, { ex: TTL });
+}
+
+export async function getRoomIdByCode(code: string): Promise<string | null> {
+  return redis.get<string>(codeKey(code));
+}
+
+export async function deleteRoomCode(code: string): Promise<void> {
+  await redis.del(codeKey(code));
 }
