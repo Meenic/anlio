@@ -1,9 +1,10 @@
-import { jsonError, jsonOk, requireAuth, validateBody } from '@/lib/api/validate';
 import {
-  getRoom,
-  getRoomIdByCode,
-  updateRoom,
-} from '@/modules/room/store';
+  jsonError,
+  jsonOk,
+  requireAuth,
+  validateBody,
+} from '@/lib/api/validate';
+import { getRoom, getRoomIdByCode, updateRoom } from '@/modules/room/store';
 import { MAX_PLAYERS } from '@/modules/room/constants';
 import type { Player } from '@/modules/room/types';
 import { JoinRoomSchema } from '../schemas';

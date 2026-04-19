@@ -52,8 +52,9 @@ export async function POST(
     });
 
     // 4. Broadcast
-    const count = Object.values(updated.players).filter((p) => p.connected)
-      .length;
+    const count = Object.values(updated.players).filter(
+      (p) => p.connected
+    ).length;
     broadcast(roomId, {
       event: 'player_left',
       data: { playerId, count },

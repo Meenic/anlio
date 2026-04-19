@@ -60,13 +60,10 @@ export function jsonError(
   message?: string,
   issues?: unknown
 ): Response {
-  return new Response(
-    JSON.stringify({ error: code, message, issues }),
-    {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }
-  );
+  return new Response(JSON.stringify({ error: code, message, issues }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 /** Structured JSON success response. */
