@@ -3,17 +3,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { anonymous } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import { db } from '@/drizzle/db';
-
-const PLACEHOLDER_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-function generatePlaceholderName(): string {
-  let out = 'Guest-';
-  for (let i = 0; i < 6; i++) {
-    out += PLACEHOLDER_ALPHABET.charAt(
-      Math.floor(Math.random() * PLACEHOLDER_ALPHABET.length)
-    );
-  }
-  return out;
-}
+import { generateGuestName } from '@/lib/random';
 
 export const auth = betterAuth({
   session: {
@@ -27,7 +17,7 @@ export const auth = betterAuth({
   }),
   plugins: [
     anonymous({
-      generateName: generatePlaceholderName,
+      generateName: generateGuestName,
     }),
     nextCookies(),
   ],

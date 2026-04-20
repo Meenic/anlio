@@ -1,7 +1,8 @@
 import { registerClient, unregisterClient } from '@/modules/sse/registry';
 import { getRoom, toPublicState, tryUpdateRoom } from '@/modules/room/store';
 import { broadcast, pingClient, sendToPlayer } from '@/modules/sse/broadcaster';
-import { requireAuth } from '@/lib/api/validate';
+import { jsonError, requireAuth } from '@/lib/api/validate';
+import { countConnectedPlayers } from '@/modules/room/selectors';
 
 /** Heartbeat interval in ms. Short enough to catch dead sockets quickly,
  *  long enough not to waste bandwidth. */
@@ -16,6 +17,11 @@ export async function GET(
   // --- SECURITY: identity is derived from the verified server session, NOT
   // from client-supplied query params. Otherwise anyone who knows a room id
   // could impersonate any player in that room. ---
+  //
+  // Note: unlike other routes we catch+return directly instead of using a
+  // try/catch wrapper around the whole handler — once the stream body is
+  // returned, a thrown `Response` from `requireAuth` can no longer be
+  // converted into the HTTP response.
   const authResult = await requireAuth(request).catch((e) => e as Response);
   if (authResult instanceof Response) return authResult;
   const playerId = authResult.id;
@@ -23,9 +29,9 @@ export async function GET(
   // The player must already exist in the room (added via the join/create flow).
   // Refuse otherwise to avoid creating ghost player entries in Redis.
   const initialRoom = await getRoom(roomId);
-  if (!initialRoom) return new Response('Room not found', { status: 404 });
+  if (!initialRoom) return jsonError(404, 'room_not_found');
   if (!initialRoom.players[playerId]) {
-    return new Response('Not a member of this room', { status: 403 });
+    return jsonError(403, 'not_a_member');
   }
 
   const stream = new ReadableStream({
@@ -70,9 +76,7 @@ export async function GET(
         // Skip if the player was already removed (kicked/left) — the
         // corresponding route has already broadcast the right event.
         if (updated && updated.players[playerId]) {
-          const count = Object.values(updated.players).filter(
-            (p) => p.connected
-          ).length;
+          const count = countConnectedPlayers(updated.players);
           broadcast(roomId, {
             event: 'player_left',
             data: { playerId, count },
@@ -109,9 +113,7 @@ export async function GET(
         // Symmetric to the `player_left` broadcast in `cleanup`: tell the
         // rest of the room their presence indicators are stale so they
         // don't have to wait for the next unrelated state update.
-        const count = Object.values(connectedRoom.players).filter(
-          (p) => p.connected
-        ).length;
+        const count = countConnectedPlayers(connectedRoom.players);
         broadcast(roomId, {
           event: 'player_joined',
           data: { player: connectedRoom.players[playerId], count },

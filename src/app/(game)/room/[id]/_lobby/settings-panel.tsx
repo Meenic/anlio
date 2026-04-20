@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { parseApiError } from '@/lib/api/client';
 import type { RoomSettings } from '@/modules/room/types';
 
 /**
@@ -51,11 +52,8 @@ export function SettingsPanel({ roomId, settings }: SettingsPanelProps) {
         body: JSON.stringify({ [key]: value }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as {
-          message?: string;
-        } | null;
         throw new Error(
-          data?.message ?? `Failed to update settings (${res.status})`
+          await parseApiError(res, `Failed to update settings (${res.status})`)
         );
       }
       // No setState — the authoritative value arrives via the
@@ -73,10 +71,7 @@ export function SettingsPanel({ roomId, settings }: SettingsPanelProps) {
         <CardTitle>Game settings</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
-        <SettingGroup
-          label="Questions"
-          disabled={pending === 'questionCount'}
-        >
+        <SettingGroup label="Questions" disabled={pending === 'questionCount'}>
           {QUESTION_COUNT_OPTIONS.map((n) => (
             <OptionButton
               key={n}

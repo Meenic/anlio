@@ -53,6 +53,16 @@ export async function requireAuth(
   return session.user;
 }
 
+/**
+ * Canonical shape of the body produced by {@link jsonError}. Exported so
+ * client-side parsers (see `@/lib/api/client`) stay in sync with the server.
+ */
+export type ApiErrorBody = {
+  error: string;
+  message?: string;
+  issues?: unknown;
+};
+
 /** Structured JSON error response used by every route. */
 export function jsonError(
   status: number,
@@ -60,7 +70,8 @@ export function jsonError(
   message?: string,
   issues?: unknown
 ): Response {
-  return new Response(JSON.stringify({ error: code, message, issues }), {
+  const body: ApiErrorBody = { error: code, message, issues };
+  return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });

@@ -82,9 +82,7 @@ function PlayerRow({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="truncate text-sm font-medium">
           {player.name}
-          {isSelf && (
-            <span className="ml-1 text-muted-foreground">(you)</span>
-          )}
+          {isSelf && <span className="ml-1 text-muted-foreground">(you)</span>}
         </span>
         {isHost && (
           <Badge variant="secondary" className="gap-1">

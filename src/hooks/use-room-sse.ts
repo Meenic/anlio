@@ -45,10 +45,7 @@ export type UseRoomSseResult = {
  * will bring us to a consistent baseline and subsequent events will apply
  * cleanly.
  */
-function applyEvent(
-  prev: RoomState | null,
-  event: SSEEvent
-): RoomState | null {
+function applyEvent(prev: RoomState | null, event: SSEEvent): RoomState | null {
   if (event.event === 'state_sync') {
     return event.data;
   }

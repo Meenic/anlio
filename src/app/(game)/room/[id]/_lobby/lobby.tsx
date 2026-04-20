@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { MIN_PLAYERS } from '@/modules/room/constants';
+import { parseApiError } from '@/lib/api/client';
+import { getConnectedPlayers } from '@/modules/room/selectors';
 import type { RoomState } from '@/modules/room/types';
 import { PlayerList } from './player-list';
 import { SettingsPanel } from './settings-panel';
@@ -49,7 +51,7 @@ function StartButton({ room }: { room: RoomState }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const connected = Object.values(room.players).filter((p) => p.connected);
+  const connected = getConnectedPlayers(room.players);
   const allReady = connected
     .filter((p) => p.id !== room.hostId)
     .every((p) => p.ready);
@@ -78,11 +80,8 @@ function StartButton({ room }: { room: RoomState }) {
         body: JSON.stringify({}),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as {
-          message?: string;
-        } | null;
         throw new Error(
-          data?.message ?? `Failed to start the game (${res.status})`
+          await parseApiError(res, `Failed to start the game (${res.status})`)
         );
       }
       // On success the server transitions phase → `starting` and broadcasts
@@ -138,11 +137,11 @@ function ReadyButton({ room, selfId }: { room: RoomState; selfId: string }) {
         body: JSON.stringify({ ready: next }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as {
-          message?: string;
-        } | null;
         throw new Error(
-          data?.message ?? `Failed to update ready state (${res.status})`
+          await parseApiError(
+            res,
+            `Failed to update ready state (${res.status})`
+          )
         );
       }
       // Authoritative state arrives via the `ready_changed` SSE event.
@@ -167,11 +166,7 @@ function ReadyButton({ room, selfId }: { room: RoomState; selfId: string }) {
         disabled={pending}
         aria-pressed={currentlyReady}
       >
-        {pending
-          ? 'Saving…'
-          : currentlyReady
-            ? 'I’m not ready'
-            : 'I’m ready'}
+        {pending ? 'Saving…' : currentlyReady ? 'I’m not ready' : 'I’m ready'}
       </Button>
     </div>
   );

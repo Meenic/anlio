@@ -2,6 +2,7 @@ import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
 import { getRoom, updateRoom } from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
 import { checkAllAnswered, revealQuestion } from '@/modules/game/engine';
+import { countConnectedPlayers } from '@/modules/room/selectors';
 import { AnswerSchema } from '../../schemas';
 
 export async function POST(
@@ -47,9 +48,7 @@ export async function POST(
     });
 
     // 4. Broadcast aggregate progress.
-    const connectedTotal = Object.values(updated.players).filter(
-      (p) => p.connected
-    ).length;
+    const connectedTotal = countConnectedPlayers(updated.players);
     broadcast(roomId, {
       event: 'answer_count',
       data: {
