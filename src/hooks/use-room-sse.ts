@@ -59,15 +59,27 @@ function applyEvent(prev: RoomState | null, event: SSEEvent): RoomState | null {
         players: { ...prev.players, [event.data.player.id]: event.data.player },
       };
     }
-    case 'player_left':
+    case 'player_left': {
+      // Transient disconnect only: keep the player in-room but mark them
+      // offline until they reconnect or the server-side grace timer removes
+      // them permanently.
+      const existing = prev.players[event.data.playerId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        players: {
+          ...prev.players,
+          [event.data.playerId]: {
+            ...existing,
+            connected: false,
+            disconnectedAt: event.data.disconnectedAt,
+          },
+        },
+      };
+    }
+    case 'player_removed':
     case 'player_kicked': {
-      // Both events signal "this player is no longer in the room". Server-side
-      // the `/leave` and `/kick` routes delete the player entry; the SSE
-      // cleanup path also broadcasts `player_left` for a mere disconnect
-      // (keeping the entry with `connected=false`), but that case is
-      // self-correcting via the `state_sync` that the route sends on the
-      // player's reconnect. Deleting client-side is correct for the primary
-      // semantics and harmless for the transient case.
+      // Permanent membership removal.
       const playerId = event.data.playerId;
       if (!prev.players[playerId]) return prev;
       const players = { ...prev.players };
@@ -240,6 +252,7 @@ export function useRoomSse(roomId: string): UseRoomSseResult {
       state_sync: makeHandler('state_sync'),
       player_joined: makeHandler('player_joined'),
       player_left: makeHandler('player_left'),
+      player_removed: makeHandler('player_removed'),
       player_kicked: makeHandler('player_kicked'),
       settings_updated: makeHandler('settings_updated'),
       ready_changed: makeHandler('ready_changed'),

@@ -4,7 +4,11 @@ import type { Player, RoomSettings, RoomState } from '@/modules/room/types';
 export type SSEEvent =
   | { event: 'state_sync'; data: RoomState }
   | { event: 'player_joined'; data: { player: Player; count: number } }
-  | { event: 'player_left'; data: { playerId: string; count: number } }
+  | {
+      event: 'player_left';
+      data: { playerId: string; count: number; disconnectedAt: number };
+    }
+  | { event: 'player_removed'; data: { playerId: string; count: number } }
   | { event: 'player_kicked'; data: { playerId: string } }
   | { event: 'settings_updated'; data: RoomSettings }
   | { event: 'ready_changed'; data: { playerId: string; ready: boolean } }

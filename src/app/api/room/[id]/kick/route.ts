@@ -1,6 +1,7 @@
 import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
 import { getRoom, updateRoom } from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
+import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
 import { registry, unregisterClient } from '@/modules/sse/registry';
 import { KickSchema } from '../../schemas';
 
@@ -31,6 +32,8 @@ export async function POST(
       delete players[targetId];
       return { ...r, players };
     });
+
+    cancelOfflineRemovalTimer(roomId, targetId);
 
     // Force-close the kicked player's SSE stream. Closing the controller
     // directly does NOT fire `request.signal.abort`, so the SSE route's
