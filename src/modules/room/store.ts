@@ -1,7 +1,7 @@
 import { redis } from '@/lib/redis';
+import { ROOM_TTL_SECONDS } from './constants';
 import type { InternalRoomState, RoomState } from './types';
 
-const TTL = 60 * 60 * 2; // 2 hours
 export const roomKey = (id: string) => `room:${id}`;
 export const codeKey = (code: string) => `code:${code}`;
 
@@ -10,7 +10,7 @@ export async function getRoom(id: string): Promise<InternalRoomState | null> {
 }
 
 export async function setRoom(state: InternalRoomState): Promise<void> {
-  await redis.set(roomKey(state.id), state, { ex: TTL });
+  await redis.set(roomKey(state.id), state, { ex: ROOM_TTL_SECONDS });
 }
 
 // Atomic read-modify-write
@@ -54,7 +54,7 @@ export function toPublicState(internalState: InternalRoomState): RoomState {
 // ---------------------------------------------------------------------------
 
 export async function setRoomCode(code: string, roomId: string): Promise<void> {
-  await redis.set(codeKey(code), roomId, { ex: TTL });
+  await redis.set(codeKey(code), roomId, { ex: ROOM_TTL_SECONDS });
 }
 
 export async function getRoomIdByCode(code: string): Promise<string | null> {

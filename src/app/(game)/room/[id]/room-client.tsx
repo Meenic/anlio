@@ -83,7 +83,11 @@ export function RoomClient({ roomId }: { roomId: string }) {
 // Loading / error shells — no hardcoded colors, only theme tokens.
 // ---------------------------------------------------------------------------
 
-function ConnectingShell({ status }: { status: 'connecting' | 'connected' | 'error' }) {
+function ConnectingShell({
+  status,
+}: {
+  status: 'connecting' | 'connected' | 'error';
+}) {
   return (
     <CenteredCard>
       {status === 'error' ? (

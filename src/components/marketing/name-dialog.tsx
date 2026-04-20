@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,25 +12,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { generateGuestName } from '@/lib/random';
 
 const MAX_NAME_LENGTH = 32;
-
-/**
- * Local `Guest-XXXXXX` generator — intentionally not shared with the server
- * side. The server has its own (in `src/lib/auth.ts`) and the two are allowed
- * to diverge because the client-side value is always overwritten via
- * `authClient.updateUser({ name })` immediately after sign-in.
- */
-const PLACEHOLDER_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-function generateGuestName(): string {
-  let out = 'Guest-';
-  for (let i = 0; i < 6; i++) {
-    out += PLACEHOLDER_ALPHABET.charAt(
-      Math.floor(Math.random() * PLACEHOLDER_ALPHABET.length)
-    );
-  }
-  return out;
-}
 
 export type NameDialogProps = {
   open: boolean;
@@ -92,7 +76,7 @@ function DialogBody({
   const trimmed = name.trim();
   const canConfirm = trimmed.length > 0 && trimmed.length <= MAX_NAME_LENGTH;
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     if (!canConfirm) return;
     onConfirm(trimmed);

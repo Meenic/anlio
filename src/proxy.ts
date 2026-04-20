@@ -1,19 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
-
-/**
- * Routes that require a valid session.
- */
-export const PROTECTED_PREFIXES = [] as const;
-
-/**
- * Routes that authenticated users should not be able to visit.
- */
-export const AUTH_PREFIXES = [] as const;
-
-/**
- * Routes that bypass all auth logic entirely.
- */
-export const PUBLIC_PREFIXES = [] as const;
+import { NextResponse } from 'next/server';
 
 /** Content-Security-Policy configuration. */
 const CSP_DIRECTIVES: Record<string, string> = {
@@ -68,7 +53,7 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
-export async function proxy(_request: NextRequest): Promise<NextResponse> {
+export async function proxy(): Promise<NextResponse> {
   return applySecurityHeaders(NextResponse.next());
 }
 

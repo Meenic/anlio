@@ -7,6 +7,7 @@ import {
   updateRoom,
 } from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
+import { countConnectedPlayers } from '@/modules/room/selectors';
 import { LeaveRoomSchema } from '../../schemas';
 
 export async function POST(
@@ -52,9 +53,7 @@ export async function POST(
     });
 
     // 4. Broadcast
-    const count = Object.values(updated.players).filter(
-      (p) => p.connected
-    ).length;
+    const count = countConnectedPlayers(updated.players);
     broadcast(roomId, {
       event: 'player_left',
       data: { playerId, count },

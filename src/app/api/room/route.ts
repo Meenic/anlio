@@ -7,24 +7,15 @@ import {
 } from '@/lib/api/validate';
 import { getRoomIdByCode, setRoom, setRoomCode } from '@/modules/room/store';
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '@/modules/room/constants';
+import { randomString } from '@/lib/random';
 import type { InternalRoomState, Player } from '@/modules/room/types';
 import { CreateRoomSchema, DEFAULT_ROOM_SETTINGS } from './schemas';
 
 const MAX_CODE_RETRIES = 5;
 
-function generateCode(): string {
-  let out = '';
-  for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
-    out += ROOM_CODE_ALPHABET.charAt(
-      Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)
-    );
-  }
-  return out;
-}
-
 async function pickUniqueCode(): Promise<string | null> {
   for (let i = 0; i < MAX_CODE_RETRIES; i++) {
-    const code = generateCode();
+    const code = randomString(ROOM_CODE_LENGTH, ROOM_CODE_ALPHABET);
     const existing = await getRoomIdByCode(code);
     if (!existing) return code;
   }

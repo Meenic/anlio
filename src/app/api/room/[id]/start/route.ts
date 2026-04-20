@@ -2,6 +2,7 @@ import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
 import { getRoom } from '@/modules/room/store';
 import { startGame } from '@/modules/game/engine';
 import { MIN_PLAYERS } from '@/modules/room/constants';
+import { getConnectedPlayers } from '@/modules/room/selectors';
 import { StartGameSchema } from '../../schemas';
 
 export async function POST(
@@ -22,7 +23,7 @@ export async function POST(
     if (room.hostId !== playerId) return jsonError(403, 'not_host');
     if (room.phase !== 'lobby') return jsonError(409, 'wrong_phase');
 
-    const connected = Object.values(room.players).filter((p) => p.connected);
+    const connected = getConnectedPlayers(room.players);
     if (connected.length < MIN_PLAYERS) {
       return jsonError(
         409,
