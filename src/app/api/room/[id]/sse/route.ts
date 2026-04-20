@@ -3,6 +3,10 @@ import { getRoom, toPublicState, tryUpdateRoom } from '@/modules/room/store';
 import { broadcast, pingClient, sendToPlayer } from '@/modules/sse/broadcaster';
 import { jsonError, requireAuth } from '@/lib/api/validate';
 import { countConnectedPlayers } from '@/modules/room/selectors';
+import {
+  cancelOfflineRemovalTimer,
+  scheduleOfflineRemovalTimer,
+} from '@/modules/sse/offline-removal';
 
 /** Heartbeat interval in ms. Short enough to catch dead sockets quickly,
  *  long enough not to waste bandwidth. */
@@ -37,6 +41,7 @@ export async function GET(
   const stream = new ReadableStream({
     async start(controller) {
       registerClient(roomId, playerId, controller);
+      cancelOfflineRemovalTimer(roomId, playerId);
 
       let heartbeat: ReturnType<typeof setInterval> | null = null;
       let cleaned = false;
@@ -54,6 +59,8 @@ export async function GET(
 
         unregisterClient(roomId, playerId);
 
+        let disconnectedAt: number | null = null;
+
         // Best-effort: room may already be deleted by endGame.
         // The `if (!room.players[playerId])` guard is CRITICAL for the kick
         // and leave flows — those routes remove the player entry before this
@@ -61,26 +68,36 @@ export async function GET(
         // resurrect the player as `{ connected: false }`, also triggering a
         // spurious `player_left` broadcast right after `player_kicked`.
         const updated = await tryUpdateRoom(roomId, (room) => {
-          if (!room.players[playerId]) return room;
+          const player = room.players[playerId];
+          if (!player || !player.connected) return room;
+
+          const now = Date.now();
+          disconnectedAt = now;
+
           return {
             ...room,
             players: {
               ...room.players,
-              [playerId]: { ...room.players[playerId], connected: false },
+              [playerId]: {
+                ...player,
+                connected: false,
+                disconnectedAt: now,
+              },
             },
           };
         });
 
-        // Broadcast so remaining clients can update presence UI AND so the
-        // engine's all-answered check doesn't deadlock on a ghost player.
-        // Skip if the player was already removed (kicked/left) — the
-        // corresponding route has already broadcast the right event.
-        if (updated && updated.players[playerId]) {
+        // Broadcast so remaining clients can update presence UI. We keep the
+        // player in-room as `connected=false` for a grace window and only
+        // auto-remove if they fail to reconnect in time.
+        if (updated && disconnectedAt !== null) {
           const count = countConnectedPlayers(updated.players);
           broadcast(roomId, {
             event: 'player_left',
-            data: { playerId, count },
+            data: { playerId, count, disconnectedAt },
           });
+
+          scheduleOfflineRemovalTimer(roomId, playerId, disconnectedAt);
         }
 
         try {
@@ -92,13 +109,29 @@ export async function GET(
 
       // Mark player as connected (best-effort — room may have been deleted
       // between the membership check above and this write).
-      const connectedRoom = await tryUpdateRoom(roomId, (room) => ({
-        ...room,
-        players: {
-          ...room.players,
-          [playerId]: { ...room.players[playerId], connected: true },
-        },
-      }));
+      const connectedRoom = await tryUpdateRoom(roomId, (room) => {
+        const player = room.players[playerId];
+        if (!player) return room;
+
+        const { disconnectedAt: _disconnectedAt, ...rest } = player;
+        return {
+          ...room,
+          players: {
+            ...room.players,
+            [playerId]: { ...rest, connected: true },
+          },
+        };
+      });
+
+      if (!connectedRoom || !connectedRoom.players[playerId]) {
+        unregisterClient(roomId, playerId);
+        try {
+          controller.close();
+        } catch {
+          // Stream already closed
+        }
+        return;
+      }
 
       if (connectedRoom) {
         // Immediately sync public state so the client UI renders instantly.

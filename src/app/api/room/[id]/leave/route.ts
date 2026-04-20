@@ -7,6 +7,7 @@ import {
   updateRoom,
 } from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
+import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
 import { countConnectedPlayers } from '@/modules/room/selectors';
 import { LeaveRoomSchema } from '../../schemas';
 
@@ -26,6 +27,8 @@ export async function POST(
     const room = await getRoom(roomId);
     if (!room) return jsonError(404, 'room_not_found');
     if (!room.players[playerId]) return jsonError(403, 'not_a_member');
+
+    cancelOfflineRemovalTimer(roomId, playerId);
 
     // If this is the last player, delete the room entirely.
     const remainingIds = Object.keys(room.players).filter(
@@ -55,7 +58,7 @@ export async function POST(
     // 4. Broadcast
     const count = countConnectedPlayers(updated.players);
     broadcast(roomId, {
-      event: 'player_left',
+      event: 'player_removed',
       data: { playerId, count },
     });
 

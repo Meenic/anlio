@@ -7,6 +7,7 @@ export type Player = {
   score: number;
   ready: boolean;
   connected: boolean; // tracks if SSE is alive
+  disconnectedAt?: number; // epoch ms — when presence last dropped
   answeredAt?: number; // epoch ms — for speed bonus calculation
 };
 
