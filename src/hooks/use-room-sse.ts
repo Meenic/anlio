@@ -1,0 +1,273 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import type { SSEEvent } from '@/modules/sse/types';
+import type { RoomState } from '@/modules/room/types';
+
+/**
+ * Connection status for the underlying `EventSource`.
+ *
+ * - `connecting`: before `onopen` fires, or immediately after a transient
+ *   network blip triggered `onerror` and the browser is auto-reconnecting.
+ * - `connected`: open TCP + HTTP/2 stream, server has acknowledged.
+ * - `error`: `EventSource.onerror` fired. `EventSource` will keep retrying
+ *   in the background on its own schedule — we do not retry manually. A new
+ *   `state_sync` lands automatically on reconnect, so local state self-heals.
+ *
+ * The server-sent `error` **event** (app-level, e.g. validation failures)
+ * is a separate channel — it populates `error: string` without flipping
+ * this `status`.
+ */
+export type RoomSseStatus = 'connecting' | 'connected' | 'error';
+
+export type UseRoomSseResult = {
+  /** Room state — `null` until the first `state_sync` event. */
+  state: RoomState | null;
+  /** Connection-level status only. */
+  status: RoomSseStatus;
+  /** `true` until the first `state_sync` is received. Never flips back to
+   *  `true` once it has been `false`, even across reconnects (reconnects
+   *  just re-sync and replace state). */
+  loading: boolean;
+  /** Most recent server-sent `error` event message, or `null`. Not related
+   *  to `status === 'error'`. */
+  error: string | null;
+};
+
+/**
+ * Apply a single `SSEEvent` to the local `RoomState` and return the next
+ * state. `state_sync` REPLACES; every other event produces a minimal patch
+ * derived from its payload — we never spread an entire `RoomState` object
+ * for non-sync events.
+ *
+ * Events received before the first `state_sync` (i.e. `prev === null`) are
+ * dropped rather than attempting to patch a null state. The first `state_sync`
+ * will bring us to a consistent baseline and subsequent events will apply
+ * cleanly.
+ */
+function applyEvent(
+  prev: RoomState | null,
+  event: SSEEvent
+): RoomState | null {
+  if (event.event === 'state_sync') {
+    return event.data;
+  }
+
+  if (prev === null) return null;
+
+  switch (event.event) {
+    case 'player_joined': {
+      return {
+        ...prev,
+        players: { ...prev.players, [event.data.player.id]: event.data.player },
+      };
+    }
+    case 'player_left':
+    case 'player_kicked': {
+      // Both events signal "this player is no longer in the room". Server-side
+      // the `/leave` and `/kick` routes delete the player entry; the SSE
+      // cleanup path also broadcasts `player_left` for a mere disconnect
+      // (keeping the entry with `connected=false`), but that case is
+      // self-correcting via the `state_sync` that the route sends on the
+      // player's reconnect. Deleting client-side is correct for the primary
+      // semantics and harmless for the transient case.
+      const playerId = event.data.playerId;
+      if (!prev.players[playerId]) return prev;
+      const players = { ...prev.players };
+      delete players[playerId];
+      return { ...prev, players };
+    }
+    case 'settings_updated': {
+      return { ...prev, settings: event.data };
+    }
+    case 'ready_changed': {
+      const existing = prev.players[event.data.playerId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        players: {
+          ...prev.players,
+          [event.data.playerId]: { ...existing, ready: event.data.ready },
+        },
+      };
+    }
+    case 'game_starting': {
+      return {
+        ...prev,
+        phase: 'starting',
+        phaseEndsAt: Date.now() + event.data.startsIn * 1000,
+      };
+    }
+    case 'question': {
+      return {
+        ...prev,
+        phase: 'question',
+        currentQuestionIndex: event.data.index,
+        phaseEndsAt: event.data.phaseEndsAt,
+        answerCount: 0,
+      };
+    }
+    case 'answer_count': {
+      return { ...prev, answerCount: event.data.answered };
+    }
+    case 'reveal': {
+      // `correctOptionId` and `answers` belong to a separate game-level
+      // store, not `RoomState`. We only patch scores/player deltas here.
+      return {
+        ...prev,
+        phase: 'reveal',
+        players: event.data.players,
+      };
+    }
+    case 'leaderboard': {
+      const players: Record<string, (typeof prev.players)[string]> = {
+        ...prev.players,
+      };
+      for (const p of event.data.players) {
+        players[p.id] = p;
+      }
+      return {
+        ...prev,
+        phase: 'leaderboard',
+        players,
+        phaseEndsAt: Date.now() + event.data.nextIn * 1000,
+      };
+    }
+    case 'game_ended': {
+      const players: Record<string, (typeof prev.players)[string]> = {
+        ...prev.players,
+      };
+      for (const p of event.data.players) {
+        players[p.id] = p;
+      }
+      return { ...prev, phase: 'ended', players };
+    }
+    case 'error': {
+      // Handled by the caller via a dedicated state setter — no state patch.
+      return prev;
+    }
+    default: {
+      // Exhaustiveness check — if a new event is added to SSEEvent and not
+      // handled above, TypeScript will fail here at compile time.
+      const _never: never = event;
+      void _never;
+      return prev;
+    }
+  }
+}
+
+/**
+ * Owns the SSE connection for a room and exposes the current `RoomState`.
+ *
+ * - **Identity**: derived server-side from the session cookie; no identity
+ *   param is accepted (passing one would let any caller impersonate).
+ * - **Reconnection**: `EventSource` handles it natively. The server re-sends
+ *   `state_sync` on every new connection, so local state self-corrects — no
+ *   manual retry logic here.
+ * - **Single source of truth**: no other code in the app should fetch or
+ *   cache room state. Consumers read exclusively from this hook.
+ */
+export function useRoomSse(roomId: string): UseRoomSseResult {
+  const [state, setState] = useState<RoomState | null>(null);
+  const [status, setStatus] = useState<RoomSseStatus>('connecting');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset state when `roomId` changes — canonical "reset during render" pattern
+  // (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+  // This avoids the setState-in-effect anti-pattern. React schedules the
+  // re-render immediately, so consumers never see stale data from the previous
+  // room.
+  const [trackedRoomId, setTrackedRoomId] = useState(roomId);
+  if (trackedRoomId !== roomId) {
+    setTrackedRoomId(roomId);
+    setState(null);
+    setStatus('connecting');
+    setLoading(true);
+    setError(null);
+  }
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    const es = new EventSource(`/api/room/${roomId}/sse`, {
+      withCredentials: true,
+    });
+
+    const handleOpen = () => {
+      setStatus('connected');
+    };
+
+    const handleError = () => {
+      // Connection-level. Do NOT manually close or reopen — EventSource keeps
+      // retrying on its own and a fresh state_sync will arrive on reconnect.
+      setStatus('error');
+    };
+
+    es.addEventListener('open', handleOpen);
+    es.addEventListener('error', handleError);
+
+    /** Generic per-event handler. Parses JSON payload, runs the reducer. */
+    function makeHandler<E extends SSEEvent['event']>(name: E) {
+      return (raw: MessageEvent) => {
+        let data: unknown;
+        try {
+          data = JSON.parse(raw.data);
+        } catch {
+          // Malformed payload — log and ignore. A subsequent event or the
+          // next state_sync will restore consistency.
+          console.error(`[use-room-sse] malformed ${name} payload`, raw.data);
+          return;
+        }
+
+        // The cast is safe because the server broadcaster only emits typed
+        // `SSEEvent` values; we're reuniting the named channel with its data.
+        const event = { event: name, data } as SSEEvent;
+
+        if (event.event === 'error') {
+          setError(event.data.message);
+          return;
+        }
+
+        setState((prev) => applyEvent(prev, event));
+        if (event.event === 'state_sync') {
+          setLoading(false);
+        }
+      };
+    }
+
+    // Named handlers for EVERY event in the SSEEvent union. A compile-time
+    // exhaustiveness check lives inside `applyEvent`; here the `handlers`
+    // object's keys must also cover the union, enforced by the mapped type.
+    const handlers: { [K in SSEEvent['event']]: (e: MessageEvent) => void } = {
+      state_sync: makeHandler('state_sync'),
+      player_joined: makeHandler('player_joined'),
+      player_left: makeHandler('player_left'),
+      player_kicked: makeHandler('player_kicked'),
+      settings_updated: makeHandler('settings_updated'),
+      ready_changed: makeHandler('ready_changed'),
+      game_starting: makeHandler('game_starting'),
+      question: makeHandler('question'),
+      answer_count: makeHandler('answer_count'),
+      reveal: makeHandler('reveal'),
+      leaderboard: makeHandler('leaderboard'),
+      game_ended: makeHandler('game_ended'),
+      error: makeHandler('error'),
+    };
+
+    for (const name of Object.keys(handlers) as Array<SSEEvent['event']>) {
+      es.addEventListener(name, handlers[name] as EventListener);
+    }
+
+    return () => {
+      es.removeEventListener('open', handleOpen);
+      es.removeEventListener('error', handleError);
+      for (const name of Object.keys(handlers) as Array<SSEEvent['event']>) {
+        es.removeEventListener(name, handlers[name] as EventListener);
+      }
+      es.close();
+    };
+  }, [roomId]);
+
+  return { state, status, loading, error };
+}
