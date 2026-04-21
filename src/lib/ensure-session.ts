@@ -27,15 +27,20 @@ export type EnsureSessionResult = 'ready' | 'aborted';
  * in sync with what the player saw in the dialog.
  */
 export async function getOrCreateSession(
-  promptName: () => Promise<string | null>
+  promptName: () => Promise<string | null>,
+  signal?: AbortSignal
 ): Promise<EnsureSessionResult> {
   const { data } = await authClient.getSession();
+  if (signal?.aborted) return 'aborted';
   if (data?.session) return 'ready';
 
   const name = await promptName();
+  if (signal?.aborted) return 'aborted';
   if (name === null) return 'aborted';
 
   await authClient.signIn.anonymous();
+  if (signal?.aborted) return 'aborted';
   await authClient.updateUser({ name });
+  if (signal?.aborted) return 'aborted';
   return 'ready';
 }
