@@ -5,14 +5,18 @@ import {
   requireAuth,
   validateBody,
 } from '@/lib/api/validate';
-import { getRoomIdByCode, setRoom, setRoomCode } from '@/modules/room/store';
+import {
+  deleteRoom,
+  getRoomIdByCode,
+  setRoom,
+  setRoomCode,
+} from '@/modules/room/store';
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '@/modules/room/constants';
 import { randomString } from '@/lib/random';
 import type { InternalRoomState, Player } from '@/modules/room/types';
 import { CreateRoomSchema, DEFAULT_ROOM_SETTINGS } from './schemas';
 
 const MAX_CODE_RETRIES = 5;
-
 async function pickUniqueCode(): Promise<string | null> {
   for (let i = 0; i < MAX_CODE_RETRIES; i++) {
     const code = randomString(ROOM_CODE_LENGTH, ROOM_CODE_ALPHABET);
@@ -61,12 +65,18 @@ export async function POST(request: Request) {
       currentQuestionIndex: 0,
       phaseEndsAt: null,
       createdAt: Date.now(),
+      version: 1,
       questions: [],
       answers: {},
     };
 
     await setRoom(state);
-    await setRoomCode(code, id);
+    try {
+      await setRoomCode(code, id);
+    } catch (error) {
+      await deleteRoom(id).catch(() => undefined);
+      throw error;
+    }
 
     // 4. No broadcast — no listeners yet.
     return jsonOk({ id, code }, 201);

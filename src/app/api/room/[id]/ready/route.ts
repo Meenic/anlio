@@ -1,5 +1,5 @@
 import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { getRoom, updateRoom } from '@/modules/room/store';
+import { getRoom, RoomConflictError, updateRoom } from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
 import { ReadySchema } from '../../schemas';
 
@@ -27,15 +27,25 @@ export async function POST(
     }
 
     // 3. Mutate
-    await updateRoom(roomId, (r) => ({
-      ...r,
-      players: {
-        ...r.players,
-        [playerId]: { ...r.players[playerId], ready },
-      },
-    }));
+    const updated = await updateRoom(roomId, (r) => {
+      if (r.phase !== 'lobby') return r;
+      const player = r.players[playerId];
+      if (!player) return r;
+      if (player.ready === ready) return r;
+      return {
+        ...r,
+        players: {
+          ...r.players,
+          [playerId]: { ...player, ready },
+        },
+      };
+    });
 
     // 4. Broadcast
+    if (updated.players[playerId]?.ready === room.players[playerId].ready) {
+      return new Response(null, { status: 204 });
+    }
+
     broadcast(roomId, {
       event: 'ready_changed',
       data: { playerId, ready },
@@ -44,6 +54,9 @@ export async function POST(
     return new Response(null, { status: 204 });
   } catch (err) {
     if (err instanceof Response) return err;
+    if (err instanceof RoomConflictError) {
+      return jsonError(409, 'room_conflict');
+    }
     throw err;
   }
 }

@@ -1,5 +1,5 @@
 import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { getRoom, updateRoom } from '@/modules/room/store';
+import { getRoom, RoomConflictError, updateRoom } from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
 import { checkAllAnswered, revealQuestion } from '@/modules/game/engine';
 import { countConnectedPlayers } from '@/modules/room/selectors';
@@ -41,10 +41,12 @@ export async function POST(
     const now = Date.now();
     const updated = await updateRoom(roomId, (r) => {
       if (r.phase !== 'question') return r;
+      if (!r.players[playerId]) return r;
       const alreadyAnswered = r.answers[playerId] !== undefined;
       if (isLockOnFirstSubmit(r.settings.answerMode) && alreadyAnswered) {
         return r;
       }
+      if (r.phaseEndsAt !== null && now > r.phaseEndsAt) return r;
 
       const firstAnsweredAt = r.players[playerId].answeredAt ?? now;
       return {
@@ -79,6 +81,9 @@ export async function POST(
     return new Response(null, { status: 204 });
   } catch (err) {
     if (err instanceof Response) return err;
+    if (err instanceof RoomConflictError) {
+      return jsonError(409, 'room_conflict');
+    }
     throw err;
   }
 }

@@ -11,6 +11,22 @@ import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
 import { countConnectedPlayers } from '@/modules/room/selectors';
 import { LeaveRoomSchema } from '../../schemas';
 
+const CODE_DELETE_RETRY_DELAY_MS = 500;
+
+function scheduleCodeDeleteRetry(code: string): void {
+  const handle = setTimeout(async () => {
+    try {
+      await deleteRoomCode(code);
+    } catch (error) {
+      console.error(
+        `[room:leave] failed delayed deleteRoomCode for code=${code}`,
+        error
+      );
+    }
+  }, CODE_DELETE_RETRY_DELAY_MS);
+  handle.unref?.();
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -37,7 +53,15 @@ export async function POST(
 
     if (remainingIds.length === 0) {
       await deleteRoom(roomId);
-      await deleteRoomCode(room.code);
+      try {
+        await deleteRoomCode(room.code);
+      } catch (error) {
+        scheduleCodeDeleteRetry(room.code);
+        console.error(
+          `[room:leave] room deleted but deleteRoomCode failed for room=${roomId} code=${room.code}`,
+          error
+        );
+      }
       return new Response(null, { status: 204 });
     }
 

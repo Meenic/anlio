@@ -4,25 +4,95 @@ import type { InternalRoomState, RoomState } from './types';
 
 export const roomKey = (id: string) => `room:${id}`;
 export const codeKey = (code: string) => `code:${code}`;
+const roomLockKey = (id: string) => `room-lock:${id}`;
+const ROOM_UPDATE_MAX_RETRIES = 5;
+const ROOM_UPDATE_LOCK_TTL_SECONDS = 2;
+const ROOM_UPDATE_BACKOFF_MS = 25;
+
+export class RoomConflictError extends Error {
+  constructor(message = 'Room update conflict') {
+    super(message);
+    this.name = 'RoomConflictError';
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeRoomVersion(state: InternalRoomState): InternalRoomState {
+  return {
+    ...state,
+    version: typeof state.version === 'number' ? state.version : 0,
+  };
+}
+
+async function acquireRoomLock(id: string, owner: string): Promise<boolean> {
+  const result = await redis.set(roomLockKey(id), owner, {
+    nx: true,
+    ex: ROOM_UPDATE_LOCK_TTL_SECONDS,
+  });
+  return result === 'OK';
+}
+
+async function releaseRoomLock(id: string, owner: string): Promise<void> {
+  const lock = await redis.get<string>(roomLockKey(id));
+  if (lock === owner) {
+    await redis.del(roomLockKey(id));
+  }
+}
 
 export async function getRoom(id: string): Promise<InternalRoomState | null> {
-  return redis.get<InternalRoomState>(roomKey(id));
+  const state = await redis.get<InternalRoomState>(roomKey(id));
+  return state ? normalizeRoomVersion(state) : null;
 }
 
 export async function setRoom(state: InternalRoomState): Promise<void> {
-  await redis.set(roomKey(state.id), state, { ex: ROOM_TTL_SECONDS });
+  await redis.set(roomKey(state.id), normalizeRoomVersion(state), {
+    ex: ROOM_TTL_SECONDS,
+  });
 }
 
-// Atomic read-modify-write
+export async function updateRoomWithRetry(
+  id: string,
+  updater: (state: InternalRoomState) => InternalRoomState
+): Promise<InternalRoomState> {
+  for (let attempt = 0; attempt < ROOM_UPDATE_MAX_RETRIES; attempt++) {
+    const owner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const acquired = await acquireRoomLock(id, owner);
+    if (!acquired) {
+      await sleep(ROOM_UPDATE_BACKOFF_MS * (attempt + 1));
+      continue;
+    }
+
+    try {
+      const current = await getRoom(id);
+      if (!current) throw new Error('Room not found');
+      const updated = normalizeRoomVersion(updater(current));
+      const next = {
+        ...updated,
+        version: current.version + 1,
+      };
+      await setRoom(next);
+      return next;
+    } finally {
+      await releaseRoomLock(id, owner);
+    }
+  }
+
+  console.warn(
+    `[room-store] update conflict after retries room=${id} retries=${ROOM_UPDATE_MAX_RETRIES}`
+  );
+  throw new RoomConflictError(
+    `Failed to update room ${id} after ${ROOM_UPDATE_MAX_RETRIES} retries`
+  );
+}
+
 export async function updateRoom(
   id: string,
   updater: (state: InternalRoomState) => InternalRoomState
 ): Promise<InternalRoomState> {
-  const current = await getRoom(id);
-  if (!current) throw new Error('Room not found');
-  const updated = updater(current);
-  await setRoom(updated);
-  return updated;
+  return updateRoomWithRetry(id, updater);
 }
 
 export async function deleteRoom(id: string): Promise<void> {
@@ -34,11 +104,14 @@ export async function tryUpdateRoom(
   id: string,
   updater: (state: InternalRoomState) => InternalRoomState
 ): Promise<InternalRoomState | null> {
-  const current = await getRoom(id);
-  if (!current) return null;
-  const updated = updater(current);
-  await setRoom(updated);
-  return updated;
+  try {
+    return await updateRoomWithRetry(id, updater);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Room not found') {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function toPublicState(internalState: InternalRoomState): RoomState {

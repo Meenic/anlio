@@ -51,6 +51,7 @@ export type RoomState = {
 // PRIVATE STATE — persisted in Redis. `answerCount` is derived from `answers`
 // in `toPublicState` and therefore omitted here to avoid a duplicate source of truth.
 export type InternalRoomState = Omit<RoomState, 'answerCount'> & {
+  version: number;
   questions: Question[];
   answers: Record<string, string>;
 };

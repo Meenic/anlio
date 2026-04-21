@@ -4,10 +4,9 @@ import {
   deleteRoom,
   deleteRoomCode,
   getRoom,
-  setRoom,
   toPublicState,
+  updateRoom,
 } from '@/modules/room/store';
-import type { InternalRoomState } from '@/modules/room/types';
 import { broadcast } from './broadcaster';
 import { registry } from './registry';
 
@@ -15,6 +14,7 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 
 // roomId -> playerId -> timeout handle
 const offlineRemovalTimers = new Map<string, Map<string, TimerHandle>>();
+const CODE_DELETE_RETRY_DELAY_MS = 500;
 
 function getOrCreateRoomTimers(roomId: string): Map<string, TimerHandle> {
   let roomTimers = offlineRemovalTimers.get(roomId);
@@ -38,6 +38,20 @@ function clearTimer(roomId: string, playerId: string): void {
   if (roomTimers.size === 0) {
     offlineRemovalTimers.delete(roomId);
   }
+}
+
+function scheduleCodeDeleteRetry(code: string): void {
+  const handle = setTimeout(async () => {
+    try {
+      await deleteRoomCode(code);
+    } catch (error) {
+      console.error(
+        `[offline-removal] failed delayed deleteRoomCode for code=${code}`,
+        error
+      );
+    }
+  }, CODE_DELETE_RETRY_DELAY_MS);
+  handle.unref?.();
 }
 
 export function cancelOfflineRemovalTimer(
@@ -80,30 +94,44 @@ async function removeIfStillOffline(
   const room = await getRoom(roomId);
   if (!room) return;
 
-  const player = room.players[playerId];
-  if (!player || player.connected) return;
-  if (player.disconnectedAt !== disconnectedAt) return;
+  const updated = await updateRoom(roomId, (current) => {
+    const player = current.players[playerId];
+    if (!player || player.connected) return current;
+    if (player.disconnectedAt !== disconnectedAt) return current;
 
-  const players = { ...room.players };
-  delete players[playerId];
-  const remainingIds = Object.keys(players);
+    const players = { ...current.players };
+    delete players[playerId];
+    const remainingIds = Object.keys(players);
+    if (remainingIds.length === 0) {
+      return { ...current, players };
+    }
 
-  if (remainingIds.length === 0) {
-    await deleteRoom(roomId);
-    await deleteRoomCode(room.code);
+    const nextHostId =
+      current.hostId === playerId ? remainingIds[0] : current.hostId;
+    return {
+      ...current,
+      hostId: nextHostId,
+      players,
+    };
+  });
+
+  if (updated.players[playerId]) {
     return;
   }
 
-  const wasHost = room.hostId === playerId;
-  const nextHostId = wasHost ? remainingIds[0] : room.hostId;
-
-  const updated: InternalRoomState = {
-    ...room,
-    hostId: nextHostId,
-    players,
-  };
-
-  await setRoom(updated);
+  if (Object.keys(updated.players).length === 0) {
+    await deleteRoom(roomId);
+    try {
+      await deleteRoomCode(room.code);
+    } catch (error) {
+      scheduleCodeDeleteRetry(room.code);
+      console.error(
+        `[offline-removal] room deleted but deleteRoomCode failed for room=${roomId} code=${room.code}`,
+        error
+      );
+    }
+    return;
+  }
 
   const count = countConnectedPlayers(updated.players);
   broadcast(roomId, {
@@ -111,7 +139,7 @@ async function removeIfStillOffline(
     data: { playerId, count },
   });
 
-  if (wasHost) {
+  if (room.hostId === playerId && updated.hostId !== playerId) {
     broadcast(roomId, {
       event: 'state_sync',
       data: toPublicState(updated),
