@@ -54,14 +54,18 @@ export async function startGame(roomId: string) {
 
   const questions = await fetchQuestions(room.settings);
 
-  await updateRoom(roomId, (r) => ({
-    ...r,
-    phase: 'starting',
-    questions,
-    currentQuestionIndex: 0,
-    answers: {},
-    phaseEndsAt: Date.now() + STARTING_DELAY_MS,
-  }));
+  const updated = await updateRoom(roomId, (r) => {
+    if (r.phase !== 'lobby') return r;
+    return {
+      ...r,
+      phase: 'starting',
+      questions,
+      currentQuestionIndex: 0,
+      answers: {},
+      phaseEndsAt: Date.now() + STARTING_DELAY_MS,
+    };
+  });
+  if (updated.phase !== 'starting') return;
 
   broadcast(roomId, {
     event: 'game_starting',
@@ -83,12 +87,28 @@ export async function pushQuestion(roomId: string) {
   const timeLimit = room.settings.timePerQuestion;
   const phaseEndsAt = Date.now() + timeLimit * 1000;
 
-  await updateRoom(roomId, (r) => ({
-    ...r,
-    phase: 'question',
-    answers: {},
-    phaseEndsAt,
-  }));
+  const expectedIndex = room.currentQuestionIndex;
+  const updated = await updateRoom(roomId, (r) => {
+    if (r.phase !== 'starting' && r.phase !== 'leaderboard') return r;
+    if (r.currentQuestionIndex !== expectedIndex) return r;
+    const nextQuestion = r.questions[r.currentQuestionIndex];
+    if (!nextQuestion) return r;
+    return {
+      ...r,
+      phase: 'question',
+      answers: {},
+      phaseEndsAt,
+    };
+  });
+  if (
+    updated.phase !== 'question' ||
+    updated.currentQuestionIndex !== expectedIndex
+  ) {
+    console.info(
+      `[engine] pushQuestion no-op room=${roomId} expectedIndex=${expectedIndex}`
+    );
+    return;
+  }
 
   // Strip the correct answer to prevent network-tab cheating
   const { correctOptionId: _c, category: _cat, ...safeQuestion } = question;
@@ -97,9 +117,9 @@ export async function pushQuestion(roomId: string) {
     event: 'question',
     data: {
       index: room.currentQuestionIndex,
-      total: room.questions.length,
+      total: updated.questions.length,
       question: safeQuestion,
-      phaseEndsAt,
+      phaseEndsAt: updated.phaseEndsAt!,
     },
   });
 
@@ -136,12 +156,26 @@ export async function revealQuestion(roomId: string) {
     scoreDeltas[playerId] = nextPlayer.score - current.players[playerId].score;
   }
 
-  const updated = await updateRoom(roomId, (r) => ({
-    ...r,
-    phase: 'reveal',
-    players: updatedPlayers,
-    phaseEndsAt: Date.now() + REVEAL_DELAY_MS,
-  }));
+  const expectedIndex = current.currentQuestionIndex;
+  const updated = await updateRoom(roomId, (r) => {
+    if (r.phase !== 'question') return r;
+    if (r.currentQuestionIndex !== expectedIndex) return r;
+    return {
+      ...r,
+      phase: 'reveal',
+      players: updatedPlayers,
+      phaseEndsAt: Date.now() + REVEAL_DELAY_MS,
+    };
+  });
+  if (
+    updated.phase !== 'reveal' ||
+    updated.currentQuestionIndex !== expectedIndex
+  ) {
+    console.info(
+      `[engine] revealQuestion no-op room=${roomId} expectedIndex=${expectedIndex}`
+    );
+    return;
+  }
 
   broadcast(roomId, {
     event: 'reveal',
@@ -176,22 +210,33 @@ export async function showLeaderboard(roomId: string) {
     return;
   }
 
-  await updateRoom(roomId, (r) => ({
-    ...r,
-    phase: 'leaderboard',
-    currentQuestionIndex: r.currentQuestionIndex + 1,
-    phaseEndsAt: Date.now() + LEADERBOARD_DELAY_MS,
-  }));
+  const expectedIndex = room.currentQuestionIndex;
+  const updated = await updateRoom(roomId, (r) => {
+    if (r.phase !== 'reveal') return r;
+    if (r.currentQuestionIndex !== expectedIndex) return r;
+    return {
+      ...r,
+      phase: 'leaderboard',
+      currentQuestionIndex: r.currentQuestionIndex + 1,
+      phaseEndsAt: Date.now() + LEADERBOARD_DELAY_MS,
+    };
+  });
+  if (updated.phase !== 'leaderboard') {
+    console.info(
+      `[engine] showLeaderboard no-op room=${roomId} expectedIndex=${expectedIndex}`
+    );
+    return;
+  }
 
-  const ranked = rankedPlayers(room.players);
+  const ranked = rankedPlayers(updated.players);
 
   broadcast(roomId, {
     event: 'leaderboard',
     data: {
       players: ranked,
       nextIn: LEADERBOARD_DELAY_MS / 1000,
-      questionIndex: room.currentQuestionIndex,
-      totalQuestions: room.questions.length,
+      questionIndex: updated.currentQuestionIndex - 1,
+      totalQuestions: updated.questions.length,
       topScore: topScore(ranked),
     },
   });
@@ -204,6 +249,7 @@ export async function endGame(roomId: string) {
   if (!room || room.phase === 'ended') return;
 
   const endedRoom = await updateRoom(roomId, (r) => {
+    if (r.phase === 'ended') return r;
     const ranked = rankedPlayers(r.players);
     const winnerIds = new Set(topScorerIds(ranked));
 
@@ -216,6 +262,7 @@ export async function endGame(roomId: string) {
 
     return { ...r, phase: 'ended', players };
   });
+  if (endedRoom.phase !== 'ended') return;
 
   const finalPlayers = rankedPlayers(endedRoom.players);
   const winnerIds = topScorerIds(finalPlayers);
@@ -236,7 +283,7 @@ export async function endGame(roomId: string) {
       id: nanoid(),
       roomId,
       players: finalPlayers,
-      settings: room.settings,
+      settings: endedRoom.settings,
     });
   } catch (error) {
     console.error(

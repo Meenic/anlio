@@ -4,7 +4,12 @@ import {
   requireAuth,
   validateBody,
 } from '@/lib/api/validate';
-import { getRoom, getRoomIdByCode, updateRoom } from '@/modules/room/store';
+import {
+  getRoom,
+  getRoomIdByCode,
+  RoomConflictError,
+  updateRoom,
+} from '@/modules/room/store';
 import { MAX_PLAYERS } from '@/modules/room/constants';
 import type { Player } from '@/modules/room/types';
 import { JoinRoomSchema } from '../schemas';
@@ -52,6 +57,7 @@ export async function POST(request: Request) {
     await updateRoom(roomId, (r) => {
       // Re-check inside the updater in case of races.
       if (r.players[playerId]) return r;
+      if (r.phase !== 'lobby') return r;
       if (Object.keys(r.players).length >= MAX_PLAYERS) return r;
       return {
         ...r,
@@ -63,6 +69,9 @@ export async function POST(request: Request) {
     return jsonOk({ id: roomId, code: room.code });
   } catch (err) {
     if (err instanceof Response) return err;
+    if (err instanceof RoomConflictError) {
+      return jsonError(409, 'room_conflict');
+    }
     throw err;
   }
 }

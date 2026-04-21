@@ -1,5 +1,5 @@
 import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { getRoom, updateRoom } from '@/modules/room/store';
+import { getRoom, RoomConflictError, updateRoom } from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
 import { UpdateSettingsSchema } from '../../schemas';
 
@@ -23,8 +23,12 @@ export async function POST(
 
     // 3. Mutate — shallow merge.
     const updated = await updateRoom(roomId, (r) => ({
-      ...r,
-      settings: { ...r.settings, ...patch },
+      ...(r.phase !== 'lobby' || r.hostId !== playerId
+        ? r
+        : {
+            ...r,
+            settings: { ...r.settings, ...patch },
+          }),
     }));
 
     // 4. Broadcast the final merged settings so every client is in sync.
@@ -36,6 +40,9 @@ export async function POST(
     return new Response(null, { status: 204 });
   } catch (err) {
     if (err instanceof Response) return err;
+    if (err instanceof RoomConflictError) {
+      return jsonError(409, 'room_conflict');
+    }
     throw err;
   }
 }
