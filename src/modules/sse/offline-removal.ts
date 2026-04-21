@@ -2,11 +2,14 @@ import { OFFLINE_PLAYER_GRACE_MS } from '@/modules/room/constants';
 import { countConnectedPlayers } from '@/modules/room/selectors';
 import {
   deleteRoom,
-  deleteRoomCode,
   getRoom,
   toPublicState,
   updateRoom,
+  codeKey,
+  roomKey,
 } from '@/modules/room/store';
+import { deleteRoomAndCode } from '@/modules/room/redis-scripts';
+import { unlinkCodeBestEffort } from '@/modules/room/code-index';
 import { broadcast } from './broadcaster';
 import { registry } from './registry';
 
@@ -14,7 +17,6 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 
 // roomId -> playerId -> timeout handle
 const offlineRemovalTimers = new Map<string, Map<string, TimerHandle>>();
-const CODE_DELETE_RETRY_DELAY_MS = 500;
 
 function getOrCreateRoomTimers(roomId: string): Map<string, TimerHandle> {
   let roomTimers = offlineRemovalTimers.get(roomId);
@@ -38,20 +40,6 @@ function clearTimer(roomId: string, playerId: string): void {
   if (roomTimers.size === 0) {
     offlineRemovalTimers.delete(roomId);
   }
-}
-
-function scheduleCodeDeleteRetry(code: string): void {
-  const handle = setTimeout(async () => {
-    try {
-      await deleteRoomCode(code);
-    } catch (error) {
-      console.error(
-        `[offline-removal] failed delayed deleteRoomCode for code=${code}`,
-        error
-      );
-    }
-  }, CODE_DELETE_RETRY_DELAY_MS);
-  handle.unref?.();
 }
 
 export function cancelOfflineRemovalTimer(
@@ -120,16 +108,12 @@ async function removeIfStillOffline(
   }
 
   if (Object.keys(updated.players).length === 0) {
-    await deleteRoom(roomId);
-    try {
-      await deleteRoomCode(room.code);
-    } catch (error) {
-      scheduleCodeDeleteRetry(room.code);
-      console.error(
-        `[offline-removal] room deleted but deleteRoomCode failed for room=${roomId} code=${room.code}`,
-        error
-      );
-    }
+    await deleteRoomAndCode(roomKey(roomId), codeKey(room.code)).catch(
+      async () => {
+        await deleteRoom(roomId).catch(() => undefined);
+        await unlinkCodeBestEffort(room.code, 'offline-removal');
+      }
+    );
     return;
   }
 

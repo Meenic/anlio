@@ -1,7 +1,6 @@
-import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { getRoom, updateRoom } from '@/modules/room/store';
-import { broadcast } from '@/modules/sse/broadcaster';
-import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
+import { requireAuth, validateBody } from '@/lib/api/validate';
+import { withApiErrors } from '@/lib/api/with-api-errors';
+import { kickPlayer } from '@/modules/room/service';
 import { registry, unregisterClient } from '@/modules/sse/registry';
 import { KickSchema } from '../../schemas';
 
@@ -9,7 +8,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return withApiErrors(async () => {
     const { id: roomId } = await params;
 
     // 1. Auth
@@ -18,22 +17,7 @@ export async function POST(
     // 2. Validate + guard
     const { targetId } = await validateBody(request, KickSchema);
 
-    const room = await getRoom(roomId);
-    if (!room) return jsonError(404, 'room_not_found');
-    if (room.hostId !== playerId) return jsonError(403, 'not_host');
-    if (room.phase !== 'lobby') return jsonError(409, 'wrong_phase');
-    if (targetId === playerId) return jsonError(400, 'cannot_kick_self');
-    if (!room.players[targetId]) return jsonError(404, 'target_not_member');
-
-    // 3. Mutate — remove the target from the player map.
-    await updateRoom(roomId, (r) => {
-      if (!r.players[targetId]) return r;
-      const players = { ...r.players };
-      delete players[targetId];
-      return { ...r, players };
-    });
-
-    cancelOfflineRemovalTimer(roomId, targetId);
+    await kickPlayer({ roomId, hostId: playerId, targetId });
 
     // Force-close the kicked player's SSE stream. Closing the controller
     // directly does NOT fire `request.signal.abort`, so the SSE route's
@@ -48,16 +32,6 @@ export async function POST(
     }
     unregisterClient(roomId, targetId);
 
-    // 4. Broadcast — `player_kicked` is distinct from `player_left` so clients
-    // can show a different toast / navigate the kicked user away.
-    broadcast(roomId, {
-      event: 'player_kicked',
-      data: { playerId: targetId },
-    });
-
     return new Response(null, { status: 204 });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    throw err;
-  }
+  });
 }

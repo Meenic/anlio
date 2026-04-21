@@ -1,4 +1,4 @@
-type Controller = ReadableStreamDefaultController;
+type Controller = ReadableStreamDefaultController<Uint8Array>;
 
 // Maps roomId -> (playerId -> Controller)
 export const registry = new Map<string, Map<string, Controller>>();

@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod';
+import type { z, ZodType } from 'zod';
 import { auth } from '@/lib/auth';
 
 /**
@@ -60,7 +60,7 @@ export async function requireAuth(
 export type ApiErrorBody = {
   error: string;
   message?: string;
-  issues?: unknown;
+  issues?: z.core.$ZodIssue[] | unknown;
 };
 
 /** Structured JSON error response used by every route. */
