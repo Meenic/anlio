@@ -44,6 +44,7 @@ export async function POST(request: Request) {
       name: user.name ?? 'Player',
       avatarUrl: user.image ?? undefined,
       score: 0,
+      wins: 0,
       ready: false,
       connected: false, // flips to true when the SSE stream opens
     };
