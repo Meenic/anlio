@@ -46,6 +46,7 @@ export async function POST(request: Request) {
       name: user.name ?? 'Host',
       avatarUrl: user.image ?? undefined,
       score: 0,
+      wins: 0,
       ready: true, // host is implicitly ready
       connected: false, // becomes true when SSE opens
     };

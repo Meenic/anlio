@@ -14,6 +14,7 @@ export const RoomSettingsSchema = z.object({
   ]),
   timePerQuestion: z.union([z.literal(10), z.literal(20), z.literal(30)]),
   category: z.string().min(1).max(32),
+  answerMode: z.enum(['allow_changes_until_deadline', 'lock_on_first_submit']),
   isPublic: z.boolean(),
 });
 
@@ -22,6 +23,7 @@ export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   questionCount: 10,
   timePerQuestion: 20,
   category: 'general',
+  answerMode: 'allow_changes_until_deadline',
   isPublic: false,
 };
 

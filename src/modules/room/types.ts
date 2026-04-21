@@ -1,10 +1,15 @@
 import { Question } from '@/modules/game/types';
 
+export type AnswerMode =
+  | 'allow_changes_until_deadline'
+  | 'lock_on_first_submit';
+
 export type Player = {
   id: string;
   name: string;
   avatarUrl?: string;
   score: number;
+  wins: number; // lobby-scoped game wins across rematches
   ready: boolean;
   connected: boolean; // tracks if SSE is alive
   disconnectedAt?: number; // epoch ms — when presence last dropped
@@ -23,6 +28,7 @@ export type RoomSettings = {
   questionCount: number; // 5 | 10 | 15 | 20
   timePerQuestion: number; // seconds: 10 | 20 | 30
   category: string; // "general" | "science" | "history" etc.
+  answerMode: AnswerMode;
   isPublic: boolean;
 };
 
