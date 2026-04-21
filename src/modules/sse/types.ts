@@ -1,4 +1,9 @@
-import type { QuestionPayload, RevealPayload } from '@/modules/game/types';
+import type {
+  GameEndedPayload,
+  LeaderboardPayload,
+  QuestionPayload,
+  RevealPayload,
+} from '@/modules/game/types';
 import type { Player, RoomSettings, RoomState } from '@/modules/room/types';
 
 export type SSEEvent =
@@ -16,6 +21,6 @@ export type SSEEvent =
   | { event: 'question'; data: QuestionPayload }
   | { event: 'answer_count'; data: { answered: number; total: number } }
   | { event: 'reveal'; data: RevealPayload }
-  | { event: 'leaderboard'; data: { players: Player[]; nextIn: number } }
-  | { event: 'game_ended'; data: { players: Player[] } }
+  | { event: 'leaderboard'; data: LeaderboardPayload }
+  | { event: 'game_ended'; data: GameEndedPayload }
   | { event: 'error'; data: { message: string } };

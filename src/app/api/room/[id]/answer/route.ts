@@ -5,6 +5,10 @@ import { checkAllAnswered, revealQuestion } from '@/modules/game/engine';
 import { countConnectedPlayers } from '@/modules/room/selectors';
 import { AnswerSchema } from '../../schemas';
 
+function isLockOnFirstSubmit(mode: string | undefined): boolean {
+  return mode === 'lock_on_first_submit';
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -22,7 +26,8 @@ export async function POST(
     if (!room) return jsonError(404, 'room_not_found');
     if (!room.players[playerId]) return jsonError(403, 'not_a_member');
     if (room.phase !== 'question') return jsonError(409, 'wrong_phase');
-    if (room.answers[playerId] !== undefined) {
+    const lockOnFirstSubmit = isLockOnFirstSubmit(room.settings.answerMode);
+    if (lockOnFirstSubmit && room.answers[playerId] !== undefined) {
       return jsonError(409, 'already_answered');
     }
     // Defensive: the reveal timer should have already fired, but if the
@@ -36,13 +41,21 @@ export async function POST(
     const now = Date.now();
     const updated = await updateRoom(roomId, (r) => {
       if (r.phase !== 'question') return r;
-      if (r.answers[playerId] !== undefined) return r;
+      const alreadyAnswered = r.answers[playerId] !== undefined;
+      if (isLockOnFirstSubmit(r.settings.answerMode) && alreadyAnswered) {
+        return r;
+      }
+
+      const firstAnsweredAt = r.players[playerId].answeredAt ?? now;
       return {
         ...r,
         answers: { ...r.answers, [playerId]: optionId },
         players: {
           ...r.players,
-          [playerId]: { ...r.players[playerId], answeredAt: now },
+          [playerId]: {
+            ...r.players[playerId],
+            answeredAt: firstAnsweredAt,
+          },
         },
       };
     });
@@ -57,9 +70,9 @@ export async function POST(
       },
     });
 
-    // Fast-forward to reveal if every connected player has locked in.
-    // `revealQuestion` has its own phase guard so a late call is a no-op.
-    if (checkAllAnswered(updated)) {
+    // Fast-forward only when answers are immutable. In change-allowed mode we
+    // keep the question open until timer expiry so players can revise.
+    if (lockOnFirstSubmit && checkAllAnswered(updated)) {
       await revealQuestion(roomId);
     }
 
