@@ -1,13 +1,13 @@
-import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { getRoom, RoomConflictError, updateRoom } from '@/modules/room/store';
-import { broadcast } from '@/modules/sse/broadcaster';
+import { requireAuth, validateBody } from '@/lib/api/validate';
+import { withApiErrors } from '@/lib/api/with-api-errors';
+import { updateRoomSettings } from '@/modules/room/service';
 import { UpdateSettingsSchema } from '../../schemas';
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return withApiErrors(async () => {
     const { id: roomId } = await params;
 
     // 1. Auth
@@ -16,33 +16,8 @@ export async function POST(
     // 2. Validate + guard
     const patch = await validateBody(request, UpdateSettingsSchema);
 
-    const room = await getRoom(roomId);
-    if (!room) return jsonError(404, 'room_not_found');
-    if (room.hostId !== playerId) return jsonError(403, 'not_host');
-    if (room.phase !== 'lobby') return jsonError(409, 'wrong_phase');
-
-    // 3. Mutate — shallow merge.
-    const updated = await updateRoom(roomId, (r) => ({
-      ...(r.phase !== 'lobby' || r.hostId !== playerId
-        ? r
-        : {
-            ...r,
-            settings: { ...r.settings, ...patch },
-          }),
-    }));
-
-    // 4. Broadcast the final merged settings so every client is in sync.
-    broadcast(roomId, {
-      event: 'settings_updated',
-      data: updated.settings,
-    });
+    await updateRoomSettings({ roomId, playerId, patch });
 
     return new Response(null, { status: 204 });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    if (err instanceof RoomConflictError) {
-      return jsonError(409, 'room_conflict');
-    }
-    throw err;
-  }
+  });
 }

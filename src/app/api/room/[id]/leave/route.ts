@@ -1,37 +1,13 @@
-import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import {
-  deleteRoom,
-  deleteRoomCode,
-  getRoom,
-  toPublicState,
-  updateRoom,
-} from '@/modules/room/store';
-import { broadcast } from '@/modules/sse/broadcaster';
-import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
-import { countConnectedPlayers } from '@/modules/room/selectors';
+import { requireAuth, validateBody } from '@/lib/api/validate';
+import { withApiErrors } from '@/lib/api/with-api-errors';
+import { leaveRoom } from '@/modules/room/service';
 import { LeaveRoomSchema } from '../../schemas';
-
-const CODE_DELETE_RETRY_DELAY_MS = 500;
-
-function scheduleCodeDeleteRetry(code: string): void {
-  const handle = setTimeout(async () => {
-    try {
-      await deleteRoomCode(code);
-    } catch (error) {
-      console.error(
-        `[room:leave] failed delayed deleteRoomCode for code=${code}`,
-        error
-      );
-    }
-  }, CODE_DELETE_RETRY_DELAY_MS);
-  handle.unref?.();
-}
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return withApiErrors(async () => {
     const { id: roomId } = await params;
 
     // 1. Auth
@@ -40,64 +16,8 @@ export async function POST(
     // 2. Validate + guard
     await validateBody(request, LeaveRoomSchema);
 
-    const room = await getRoom(roomId);
-    if (!room) return jsonError(404, 'room_not_found');
-    if (!room.players[playerId]) return jsonError(403, 'not_a_member');
-
-    cancelOfflineRemovalTimer(roomId, playerId);
-
-    // If this is the last player, delete the room entirely.
-    const remainingIds = Object.keys(room.players).filter(
-      (id) => id !== playerId
-    );
-
-    if (remainingIds.length === 0) {
-      await deleteRoom(roomId);
-      try {
-        await deleteRoomCode(room.code);
-      } catch (error) {
-        scheduleCodeDeleteRetry(room.code);
-        console.error(
-          `[room:leave] room deleted but deleteRoomCode failed for room=${roomId} code=${room.code}`,
-          error
-        );
-      }
-      return new Response(null, { status: 204 });
-    }
-
-    // 3. Mutate — remove the player, transfer host if they were hosting.
-    const wasHost = room.hostId === playerId;
-    const newHostId = wasHost ? remainingIds[0] : room.hostId;
-
-    const updated = await updateRoom(roomId, (r) => {
-      const players = { ...r.players };
-      delete players[playerId];
-      return {
-        ...r,
-        hostId: newHostId,
-        players,
-      };
-    });
-
-    // 4. Broadcast
-    const count = countConnectedPlayers(updated.players);
-    broadcast(roomId, {
-      event: 'player_removed',
-      data: { playerId, count },
-    });
-
-    // If the host changed, resend state_sync so every client picks up the
-    // new `hostId` immediately instead of waiting for the next event.
-    if (wasHost) {
-      broadcast(roomId, {
-        event: 'state_sync',
-        data: toPublicState(updated),
-      });
-    }
+    await leaveRoom({ roomId, playerId });
 
     return new Response(null, { status: 204 });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    throw err;
-  }
+  });
 }

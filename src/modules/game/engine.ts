@@ -2,9 +2,7 @@ import { getRoom, updateRoom, deleteRoom } from '../room/store';
 import { broadcast } from '../sse/broadcaster';
 import { calculateTimeBonus } from './scoring';
 import { fetchQuestions } from './questions';
-import { db } from '@/drizzle/db';
-import { gameResults } from '@/drizzle/schemas/game-schema';
-import { nanoid } from 'nanoid';
+import { insertGameResult } from './results-repo';
 import type { InternalRoomState, Player } from '../room/types';
 import {
   STARTING_DELAY_MS,
@@ -131,15 +129,17 @@ export async function revealQuestion(roomId: string) {
   if (!current || current.phase !== 'question') return;
 
   const question = current.questions[current.currentQuestionIndex];
+  if (!question || current.phaseEndsAt === null) return;
   const updatedPlayers = { ...current.players };
   const timeLimitSeconds = current.settings.timePerQuestion;
-  const questionStartedAt = current.phaseEndsAt! - timeLimitSeconds * 1000;
+  const questionStartedAt = current.phaseEndsAt - timeLimitSeconds * 1000;
 
   for (const [playerId, optionId] of Object.entries(current.answers)) {
     if (optionId === question.correctOptionId) {
       const player = updatedPlayers[playerId];
+      if (!player || player.answeredAt === undefined) continue;
       const timeBonus = calculateTimeBonus(
-        player.answeredAt!,
+        player.answeredAt,
         questionStartedAt,
         timeLimitSeconds
       );
@@ -279,8 +279,7 @@ export async function endGame(roomId: string) {
   // Persist results BEFORE deleting the room so a DB failure leaves
   // recoverable state in Redis rather than silently destroying it.
   try {
-    await db.insert(gameResults).values({
-      id: nanoid(),
+    await insertGameResult({
       roomId,
       players: finalPlayers,
       settings: endedRoom.settings,

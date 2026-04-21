@@ -12,6 +12,18 @@ import {
  *  long enough not to waste bandwidth. */
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
+function isResponse(error: unknown): error is Response {
+  return error instanceof Response;
+}
+
+type AuthUser = { id: string; name: string; image?: string | null };
+
+function isAuthUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<AuthUser>;
+  return typeof candidate.id === 'string' && typeof candidate.name === 'string';
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -26,8 +38,14 @@ export async function GET(
   // try/catch wrapper around the whole handler — once the stream body is
   // returned, a thrown `Response` from `requireAuth` can no longer be
   // converted into the HTTP response.
-  const authResult = await requireAuth(request).catch((e) => e as Response);
-  if (authResult instanceof Response) return authResult;
+  const authResult = await requireAuth(request).catch(
+    (error: unknown) => error
+  );
+  if (isResponse(authResult)) return authResult;
+  if (!isAuthUser(authResult)) {
+    console.error('[sse] unexpected auth failure shape', authResult);
+    return jsonError(500, 'internal_error');
+  }
   const playerId = authResult.id;
 
   // The player must already exist in the room (added via the join/create flow).

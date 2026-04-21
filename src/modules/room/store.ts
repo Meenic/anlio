@@ -1,12 +1,11 @@
 import { redis } from '@/lib/redis';
 import { ROOM_TTL_SECONDS } from './constants';
 import type { InternalRoomState, RoomState } from './types';
+import { updateRoomIfVersion } from './redis-scripts';
 
 export const roomKey = (id: string) => `room:${id}`;
 export const codeKey = (code: string) => `code:${code}`;
-const roomLockKey = (id: string) => `room-lock:${id}`;
 const ROOM_UPDATE_MAX_RETRIES = 5;
-const ROOM_UPDATE_LOCK_TTL_SECONDS = 2;
 const ROOM_UPDATE_BACKOFF_MS = 25;
 
 export class RoomConflictError extends Error {
@@ -27,21 +26,6 @@ function normalizeRoomVersion(state: InternalRoomState): InternalRoomState {
   };
 }
 
-async function acquireRoomLock(id: string, owner: string): Promise<boolean> {
-  const result = await redis.set(roomLockKey(id), owner, {
-    nx: true,
-    ex: ROOM_UPDATE_LOCK_TTL_SECONDS,
-  });
-  return result === 'OK';
-}
-
-async function releaseRoomLock(id: string, owner: string): Promise<void> {
-  const lock = await redis.get<string>(roomLockKey(id));
-  if (lock === owner) {
-    await redis.del(roomLockKey(id));
-  }
-}
-
 export async function getRoom(id: string): Promise<InternalRoomState | null> {
   const state = await redis.get<InternalRoomState>(roomKey(id));
   return state ? normalizeRoomVersion(state) : null;
@@ -58,26 +42,24 @@ export async function updateRoomWithRetry(
   updater: (state: InternalRoomState) => InternalRoomState
 ): Promise<InternalRoomState> {
   for (let attempt = 0; attempt < ROOM_UPDATE_MAX_RETRIES; attempt++) {
-    const owner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const acquired = await acquireRoomLock(id, owner);
-    if (!acquired) {
-      await sleep(ROOM_UPDATE_BACKOFF_MS * (attempt + 1));
-      continue;
+    const current = await getRoom(id);
+    if (!current) throw new Error('Room not found');
+    const updated = normalizeRoomVersion(updater(current));
+    const next = {
+      ...updated,
+      version: current.version + 1,
+    };
+    const committed = await updateRoomIfVersion(
+      roomKey(id),
+      current.version,
+      next,
+      ROOM_TTL_SECONDS
+    ).catch(() => false);
+    if (committed) {
+      return next;
     }
 
-    try {
-      const current = await getRoom(id);
-      if (!current) throw new Error('Room not found');
-      const updated = normalizeRoomVersion(updater(current));
-      const next = {
-        ...updated,
-        version: current.version + 1,
-      };
-      await setRoom(next);
-      return next;
-    } finally {
-      await releaseRoomLock(id, owner);
-    }
+    await sleep(ROOM_UPDATE_BACKOFF_MS * (attempt + 1));
   }
 
   console.warn(
