@@ -15,8 +15,34 @@ export interface QuestionPayload {
   phaseEndsAt: number;
 }
 
+export interface RevealQuestion {
+  id: string;
+  text: string;
+  options: Question['options'];
+  category: string;
+}
+
 export interface RevealPayload {
+  questionIndex: number;
+  totalQuestions: number;
+  question: RevealQuestion;
   correctOptionId: string;
   answers: Record<string, string>;
   players: Record<string, Player>;
+  scoreDeltas: Record<string, number>;
+  revealedAt: number;
+}
+
+export interface LeaderboardPayload {
+  players: Player[];
+  nextIn: number;
+  questionIndex: number;
+  totalQuestions: number;
+  topScore: number;
+}
+
+export interface GameEndedPayload {
+  players: Player[];
+  winnerIds: string[];
+  topScore: number;
 }

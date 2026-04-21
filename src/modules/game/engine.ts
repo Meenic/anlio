@@ -31,6 +31,15 @@ function rankedPlayers(players: Record<string, Player>): Player[] {
   return Object.values(players).sort((a, b) => b.score - a.score);
 }
 
+function topScore(players: Player[]): number {
+  return players[0]?.score ?? 0;
+}
+
+function topScorerIds(players: Player[]): string[] {
+  const score = topScore(players);
+  return players.filter((p) => p.score === score).map((p) => p.id);
+}
+
 // ---------------------------------------------------------------------------
 // Phase transitions
 // ---------------------------------------------------------------------------
@@ -122,6 +131,11 @@ export async function revealQuestion(roomId: string) {
     }
   }
 
+  const scoreDeltas: Record<string, number> = {};
+  for (const [playerId, nextPlayer] of Object.entries(updatedPlayers)) {
+    scoreDeltas[playerId] = nextPlayer.score - current.players[playerId].score;
+  }
+
   const updated = await updateRoom(roomId, (r) => ({
     ...r,
     phase: 'reveal',
@@ -132,9 +146,19 @@ export async function revealQuestion(roomId: string) {
   broadcast(roomId, {
     event: 'reveal',
     data: {
+      questionIndex: current.currentQuestionIndex,
+      totalQuestions: current.questions.length,
+      question: {
+        id: question.id,
+        text: question.text,
+        options: question.options,
+        category: question.category,
+      },
       correctOptionId: question.correctOptionId,
       answers: updated.answers,
       players: updated.players,
+      scoreDeltas,
+      revealedAt: Date.now(),
     },
   });
 
@@ -159,11 +183,16 @@ export async function showLeaderboard(roomId: string) {
     phaseEndsAt: Date.now() + LEADERBOARD_DELAY_MS,
   }));
 
+  const ranked = rankedPlayers(room.players);
+
   broadcast(roomId, {
     event: 'leaderboard',
     data: {
-      players: rankedPlayers(room.players),
+      players: ranked,
       nextIn: LEADERBOARD_DELAY_MS / 1000,
+      questionIndex: room.currentQuestionIndex,
+      totalQuestions: room.questions.length,
+      topScore: topScore(ranked),
     },
   });
 
@@ -174,13 +203,30 @@ export async function endGame(roomId: string) {
   const room = await getRoom(roomId);
   if (!room || room.phase === 'ended') return;
 
-  await updateRoom(roomId, (r) => ({ ...r, phase: 'ended' }));
+  const endedRoom = await updateRoom(roomId, (r) => {
+    const ranked = rankedPlayers(r.players);
+    const winnerIds = new Set(topScorerIds(ranked));
 
-  const finalPlayers = rankedPlayers(room.players);
+    const players: Record<string, Player> = {};
+    for (const [playerId, player] of Object.entries(r.players)) {
+      players[playerId] = winnerIds.has(playerId)
+        ? { ...player, wins: player.wins + 1 }
+        : player;
+    }
+
+    return { ...r, phase: 'ended', players };
+  });
+
+  const finalPlayers = rankedPlayers(endedRoom.players);
+  const winnerIds = topScorerIds(finalPlayers);
 
   broadcast(roomId, {
     event: 'game_ended',
-    data: { players: finalPlayers },
+    data: {
+      players: finalPlayers,
+      winnerIds,
+      topScore: topScore(finalPlayers),
+    },
   });
 
   // Persist results BEFORE deleting the room so a DB failure leaves
