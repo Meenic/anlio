@@ -24,15 +24,14 @@ export async function POST(request: Request) {
     const room = await getRoom(roomId);
     if (!room) return jsonError(404, 'room_not_found');
 
-    if (room.phase !== 'lobby') {
-      return jsonError(409, 'game_already_started');
+    // Idempotent re-join: if already a member, return success even after the
+    // lobby phase so refresh/direct-link reconnects keep working.
+    if (room.players[playerId]) {
+      return jsonOk({ id: roomId, code: room.code });
     }
 
-    // Idempotent re-join: if already a member, just return the id. The client
-    // will (re)open its SSE stream and the existing SSE route will fire
-    // `player_joined` for them. No duplicate state write, no duplicate event.
-    if (room.players[playerId]) {
-      return jsonOk({ id: roomId });
+    if (room.phase !== 'lobby') {
+      return jsonError(409, 'game_already_started');
     }
 
     if (Object.keys(room.players).length >= MAX_PLAYERS) {
@@ -60,7 +59,7 @@ export async function POST(request: Request) {
     });
 
     // 4. No broadcast here — SSE route emits `player_joined` on connect.
-    return jsonOk({ id: roomId });
+    return jsonOk({ id: roomId, code: room.code });
   } catch (err) {
     if (err instanceof Response) return err;
     throw err;

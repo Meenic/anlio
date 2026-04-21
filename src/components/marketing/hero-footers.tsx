@@ -110,7 +110,7 @@ export function CreateRoomButton() {
         );
       }
       const data = (await res.json()) as { id: string; code: string };
-      router.push(`/room/${data.id}`);
+      router.push(`/room/${data.code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
       setPending(false);
@@ -186,8 +186,8 @@ export function JoinRoomForm() {
           await parseApiError(res, `Failed to join room (${res.status})`)
         );
       }
-      const data = (await res.json()) as { id: string };
-      router.push(`/room/${data.id}`);
+      const data = (await res.json()) as { id: string; code: string };
+      router.push(`/room/${data.code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
       setPending(false);
