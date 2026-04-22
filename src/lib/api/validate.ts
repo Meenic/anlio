@@ -1,21 +1,25 @@
 import type { z, ZodType } from 'zod';
 import { auth } from '@/lib/auth';
 
+/** Structured error that route middleware converts into an HTTP Response. */
+export class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    public readonly message: string,
+    public readonly issues?: unknown
+  ) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
 /**
  * Validate a request body against a Zod schema.
  *
- * On failure this THROWS a well-formed `Response` object. Route handlers
- * should catch it with the standard pattern:
- *
- * ```ts
- * try {
- *   const body = await validateBody(request, SomeSchema);
- *   // …
- * } catch (err) {
- *   if (err instanceof Response) return err;
- *   throw err;
- * }
- * ```
+ * On failure this THROWS an {@link HttpError}. Route handlers using
+ * {@link withApiErrors} do not need an explicit catch — the wrapper
+ * converts the error into the correct HTTP response automatically.
  */
 export async function validateBody<T>(
   request: Request,
@@ -25,12 +29,12 @@ export async function validateBody<T>(
   try {
     raw = await request.json();
   } catch {
-    throw jsonError(400, 'invalid_json', 'Request body is not valid JSON.');
+    throw new HttpError(400, 'invalid_json', 'Request body is not valid JSON.');
   }
 
   const result = schema.safeParse(raw);
   if (!result.success) {
-    throw jsonError(
+    throw new HttpError(
       400,
       'validation_failed',
       'Request body did not match the expected schema.',
@@ -42,14 +46,15 @@ export async function validateBody<T>(
 
 /**
  * Require an authenticated session. Returns the session user object.
- * On failure this THROWS a well-formed `Response` (401) — caught by the
- * standard route catch block just like `validateBody`.
+ * On failure this THROWS an {@link HttpError} (401) — caught by
+ * {@link withApiErrors} automatically.
  */
 export async function requireAuth(
   request: Request
 ): Promise<{ id: string; name: string; image?: string | null }> {
   const session = await auth.api.getSession({ headers: request.headers });
-  if (!session?.user?.id) throw jsonError(401, 'unauthorized');
+  if (!session?.user?.id)
+    throw new HttpError(401, 'unauthorized', 'Unauthorized');
   return session.user;
 }
 
@@ -62,6 +67,19 @@ export type ApiErrorBody = {
   message?: string;
   issues?: z.core.$ZodIssue[] | unknown;
 };
+
+/** Build a JSON {@link Response} from an {@link HttpError}. */
+export function httpErrorToResponse(error: HttpError): Response {
+  const body: ApiErrorBody = {
+    error: error.code,
+    message: error.message,
+    issues: error.issues,
+  };
+  return new Response(JSON.stringify(body), {
+    status: error.status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
 /** Structured JSON error response used by every route. */
 export function jsonError(

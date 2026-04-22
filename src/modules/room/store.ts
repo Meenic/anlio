@@ -30,7 +30,7 @@ export async function setRoom(state: InternalRoomState): Promise<void> {
   });
 }
 
-export async function updateRoomWithRetry(
+export async function updateRoom(
   id: string,
   updater: (state: InternalRoomState) => InternalRoomState
 ): Promise<InternalRoomState> {
@@ -70,13 +70,6 @@ export async function updateRoomWithRetry(
   );
 }
 
-export async function updateRoom(
-  id: string,
-  updater: (state: InternalRoomState) => InternalRoomState
-): Promise<InternalRoomState> {
-  return updateRoomWithRetry(id, updater);
-}
-
 export async function deleteRoom(id: string): Promise<void> {
   await redis.del(roomKey(id));
 }
@@ -87,7 +80,7 @@ export async function tryUpdateRoom(
   updater: (state: InternalRoomState) => InternalRoomState
 ): Promise<InternalRoomState | null> {
   try {
-    return await updateRoomWithRetry(id, updater);
+    return await updateRoom(id, updater);
   } catch (error) {
     if (error instanceof Error && error.message === 'Room not found') {
       return null;

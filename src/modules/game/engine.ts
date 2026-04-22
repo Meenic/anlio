@@ -6,6 +6,7 @@ import { db } from '@/drizzle/db';
 import { gameResults } from '@/drizzle/schemas/game-schema';
 import { nanoid } from 'nanoid';
 import type { InternalRoomState, Player, RoomSettings } from '../room/types';
+import { getConnectedPlayers } from '../room/selectors';
 import {
   STARTING_DELAY_MS,
   REVEAL_DELAY_MS,
@@ -19,11 +20,9 @@ import {
 
 /** Check if every connected player has locked in an answer. */
 export function checkAllAnswered(room: InternalRoomState): boolean {
-  const connectedPlayers = Object.values(room.players).filter(
-    (p) => p.connected
-  );
-  if (connectedPlayers.length === 0) return false;
-  return connectedPlayers.every((p) => room.answers[p.id] !== undefined);
+  const connected = getConnectedPlayers(room.players);
+  if (connected.length === 0) return false;
+  return connected.every((p) => room.answers[p.id] !== undefined);
 }
 
 /** Return players sorted by score descending. */

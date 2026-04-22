@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { MIN_PLAYERS } from '@/modules/room/constants';
 import { parseApiError } from '@/lib/api/client';
@@ -120,6 +120,12 @@ function ReadyButton({ room, selfId }: { room: RoomState; selfId: string }) {
   const self = room.players[selfId];
   const currentlyReady = self?.ready ?? false;
 
+  // Clear pending when the authoritative SSE state confirms the toggle.
+  useEffect(() => {
+    if (pending) setPending(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentlyReady]);
+
   async function handleToggle() {
     if (pending || !self) return;
     const next = !currentlyReady;
@@ -140,9 +146,9 @@ function ReadyButton({ room, selfId }: { room: RoomState; selfId: string }) {
         );
       }
       // Authoritative state arrives via the `ready_changed` SSE event.
+      // `useEffect` above will clear `pending` when `currentlyReady` flips.
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
-    } finally {
       setPending(false);
     }
   }

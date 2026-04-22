@@ -1,7 +1,12 @@
 import { registerClient, unregisterClient } from '@/modules/sse/registry';
 import { getRoom, toPublicState, tryUpdateRoom } from '@/modules/room/store';
 import { broadcast, pingClient, sendToPlayer } from '@/modules/sse/broadcaster';
-import { jsonError, requireAuth } from '@/lib/api/validate';
+import {
+  HttpError,
+  httpErrorToResponse,
+  jsonError,
+  requireAuth,
+} from '@/lib/api/validate';
 import { countConnectedPlayers } from '@/modules/room/selectors';
 import {
   cancelOfflineRemovalTimer,
@@ -12,18 +17,6 @@ import {
  *  long enough not to waste bandwidth. */
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
-function isResponse(error: unknown): error is Response {
-  return error instanceof Response;
-}
-
-type AuthUser = { id: string; name: string; image?: string | null };
-
-function isAuthUser(value: unknown): value is AuthUser {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<AuthUser>;
-  return typeof candidate.id === 'string' && typeof candidate.name === 'string';
-}
-
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -33,20 +26,13 @@ export async function GET(
   // --- SECURITY: identity is derived from the verified server session, NOT
   // from client-supplied query params. Otherwise anyone who knows a room id
   // could impersonate any player in that room. ---
-  //
-  // Note: unlike other routes we catch+return directly instead of using a
-  // try/catch wrapper around the whole handler — once the stream body is
-  // returned, a thrown `Response` from `requireAuth` can no longer be
-  // converted into the HTTP response.
-  const authResult = await requireAuth(request).catch(
-    (error: unknown) => error
-  );
-  if (isResponse(authResult)) return authResult;
-  if (!isAuthUser(authResult)) {
-    console.error('[sse] unexpected auth failure shape', authResult);
-    return jsonError(500, 'internal_error');
+  let playerId: string;
+  try {
+    playerId = (await requireAuth(request)).id;
+  } catch (error) {
+    if (error instanceof HttpError) return httpErrorToResponse(error);
+    throw error;
   }
-  const playerId = authResult.id;
 
   // The player must already exist in the room (added via the join/create flow).
   // Refuse otherwise to avoid creating ghost player entries in Redis.
