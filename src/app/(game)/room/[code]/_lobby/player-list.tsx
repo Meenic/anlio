@@ -25,7 +25,7 @@ export function PlayerList({ players, hostId, selfId }: PlayerListProps) {
   const total = sorted.length;
 
   return (
-    <Card size="sm" className="gap-3">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span>Players</span>
@@ -34,7 +34,7 @@ export function PlayerList({ players, hostId, selfId }: PlayerListProps) {
           </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-1.5">
+      <CardContent className="flex flex-col gap-3.5">
         {sorted.map((p) => (
           <PlayerRow
             key={p.id}
@@ -62,7 +62,7 @@ function PlayerRow({
   return (
     <div
       className={cn(
-        'flex items-center gap-3 rounded-2xl px-3 py-2 transition-opacity',
+        'flex items-center gap-3 rounded-2xl transition-opacity',
         !player.connected && 'opacity-60'
       )}
       data-connected={player.connected}
@@ -85,7 +85,7 @@ function PlayerRow({
           {isSelf && <span className="ml-1 text-muted-foreground">(you)</span>}
         </span>
         {isHost && (
-          <Badge variant="secondary" className="gap-1">
+          <Badge variant="secondary">
             <Crown />
             Host
           </Badge>

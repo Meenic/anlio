@@ -232,8 +232,7 @@ function RoomLive({ roomId }: { roomId: string }) {
       content = <PhasePlaceholder phase={state.phase} />;
       break;
     default: {
-      const _never: never = state.phase;
-      void _never;
+      state.phase satisfies never;
       content = null;
     }
   }

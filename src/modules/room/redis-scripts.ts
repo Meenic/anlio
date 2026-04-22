@@ -131,8 +131,8 @@ export async function createRoomWithCodeIfAbsent(
 if redis.call("EXISTS", KEYS[1]) == 1 then
   return 0
 end
-redis.call("SET", KEYS[1], ARGV[1], "EX", tonumber(ARGV[2]))
-redis.call("SET", KEYS[2], ARGV[3], "EX", tonumber(ARGV[2]))
+redis.call("SET", KEYS[2], ARGV[1], "EX", tonumber(ARGV[2]))
+redis.call("SET", KEYS[1], ARGV[3], "EX", tonumber(ARGV[2]))
 return 1
 `,
     [codeRedisKey, roomRedisKey],

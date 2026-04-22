@@ -101,12 +101,7 @@ function StartButton({ room }: { room: RoomState }) {
           {error}
         </p>
       )}
-      <Button
-        size="lg"
-        onClick={handleStart}
-        disabled={!canStart}
-        aria-disabled={!canStart}
-      >
+      <Button size="lg" onClick={handleStart} disabled={!canStart}>
         <Play />
         {pending ? 'Starting…' : 'Start game'}
       </Button>

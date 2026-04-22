@@ -32,8 +32,8 @@ export function RoomCode({ code }: { code: string }) {
   }
 
   return (
-    <Card className="gap-3">
-      <CardContent className="flex flex-col items-center gap-3 py-4 sm:flex-row sm:justify-between">
+    <Card>
+      <CardContent className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
         <div className="flex flex-col items-center gap-1 sm:items-start">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Room code

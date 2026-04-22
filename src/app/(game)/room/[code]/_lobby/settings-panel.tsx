@@ -66,7 +66,7 @@ export function SettingsPanel({ roomId, settings }: SettingsPanelProps) {
   }
 
   return (
-    <Card size="sm" className="gap-4">
+    <Card>
       <CardHeader>
         <CardTitle>Game settings</CardTitle>
       </CardHeader>
