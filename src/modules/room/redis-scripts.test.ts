@@ -246,8 +246,7 @@ describe('Redis Scripts', () => {
         roomKey,
         'player-1',
         'opt-A',
-        answeredAt,
-        false
+        answeredAt
       );
       assert.strictEqual(result.status, 'updated');
       if (result.status === 'updated') {
@@ -264,8 +263,7 @@ describe('Redis Scripts', () => {
         roomKey,
         'player-1',
         'opt-B',
-        Date.now(),
-        false
+        Date.now()
       );
       assert.strictEqual(result2.status, 'updated');
       if (result2.status === 'updated') {
@@ -285,24 +283,18 @@ describe('Redis Scripts', () => {
 
       const state = mockRoom(roomId, code);
       state.phase = 'question';
+      state.settings.answerMode = 'lock_on_first_submit';
       await redis.set(roomKey, state);
 
       // First submit
-      await submitAnswerAtomically(
-        roomKey,
-        'player-1',
-        'opt-A',
-        Date.now(),
-        true
-      );
+      await submitAnswerAtomically(roomKey, 'player-1', 'opt-A', Date.now());
 
       // Second submit
       const result2 = await submitAnswerAtomically(
         roomKey,
         'player-1',
         'opt-B',
-        Date.now(),
-        true
+        Date.now()
       );
       assert.strictEqual(result2.status, 'already_answered');
     });
@@ -319,8 +311,7 @@ describe('Redis Scripts', () => {
         roomKey,
         'player-1',
         'opt-A',
-        Date.now(),
-        true
+        Date.now()
       );
       assert.strictEqual(result.status, 'wrong_phase');
 
@@ -333,8 +324,7 @@ describe('Redis Scripts', () => {
         roomKey,
         'player-1',
         'opt-A',
-        Date.now(),
-        true
+        Date.now()
       );
       assert.strictEqual(result2.status, 'not_member');
     });

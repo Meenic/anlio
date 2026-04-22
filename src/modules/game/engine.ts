@@ -1,9 +1,11 @@
-import { getRoom, updateRoom, deleteRoom } from '../room/store';
+import { updateRoom, deleteRoom } from '../room/store';
 import { broadcast } from '../sse/broadcaster';
 import { calculateTimeBonus } from './scoring';
 import { fetchQuestions } from './questions';
-import { insertGameResult } from './results-repo';
-import type { InternalRoomState, Player } from '../room/types';
+import { db } from '@/drizzle/db';
+import { gameResults } from '@/drizzle/schemas/game-schema';
+import { nanoid } from 'nanoid';
+import type { InternalRoomState, Player, RoomSettings } from '../room/types';
 import {
   STARTING_DELAY_MS,
   REVEAL_DELAY_MS,
@@ -46,11 +48,8 @@ function topScorerIds(players: Player[]): string[] {
 // scheduler (e.g. Upstash QStash) for production use.
 // ---------------------------------------------------------------------------
 
-export async function startGame(roomId: string) {
-  const room = await getRoom(roomId);
-  if (!room || room.phase !== 'lobby') return;
-
-  const questions = await fetchQuestions(room.settings);
+export async function startGame(roomId: string, settings: RoomSettings) {
+  const questions = await fetchQuestions(settings);
 
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'lobby') return r;
@@ -74,23 +73,18 @@ export async function startGame(roomId: string) {
 }
 
 export async function pushQuestion(roomId: string) {
-  const room = await getRoom(roomId);
-  if (!room || (room.phase !== 'starting' && room.phase !== 'leaderboard')) {
-    return;
-  }
+  let expectedIndex = -1;
+  let timeLimit = 0;
 
-  const question = room.questions[room.currentQuestionIndex];
-  if (!question) return;
-
-  const timeLimit = room.settings.timePerQuestion;
-  const phaseEndsAt = Date.now() + timeLimit * 1000;
-
-  const expectedIndex = room.currentQuestionIndex;
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'starting' && r.phase !== 'leaderboard') return r;
-    if (r.currentQuestionIndex !== expectedIndex) return r;
     const nextQuestion = r.questions[r.currentQuestionIndex];
     if (!nextQuestion) return r;
+
+    expectedIndex = r.currentQuestionIndex;
+    timeLimit = r.settings.timePerQuestion;
+    const phaseEndsAt = Date.now() + timeLimit * 1000;
+
     return {
       ...r,
       phase: 'question',
@@ -108,13 +102,14 @@ export async function pushQuestion(roomId: string) {
     return;
   }
 
+  const question = updated.questions[updated.currentQuestionIndex];
   // Strip the correct answer to prevent network-tab cheating
   const { correctOptionId: _c, category: _cat, ...safeQuestion } = question;
 
   broadcast(roomId, {
     event: 'question',
     data: {
-      index: room.currentQuestionIndex,
+      index: updated.currentQuestionIndex,
       total: updated.questions.length,
       question: safeQuestion,
       phaseEndsAt: updated.phaseEndsAt!,
@@ -125,41 +120,39 @@ export async function pushQuestion(roomId: string) {
 }
 
 export async function revealQuestion(roomId: string) {
-  const current = await getRoom(roomId);
-  if (!current || current.phase !== 'question') return;
+  let scoreDeltas: Record<string, number> = {};
 
-  const question = current.questions[current.currentQuestionIndex];
-  if (!question || current.phaseEndsAt === null) return;
-  const updatedPlayers = { ...current.players };
-  const timeLimitSeconds = current.settings.timePerQuestion;
-  const questionStartedAt = current.phaseEndsAt - timeLimitSeconds * 1000;
-
-  for (const [playerId, optionId] of Object.entries(current.answers)) {
-    if (optionId === question.correctOptionId) {
-      const player = updatedPlayers[playerId];
-      if (!player || player.answeredAt === undefined) continue;
-      const timeBonus = calculateTimeBonus(
-        player.answeredAt,
-        questionStartedAt,
-        timeLimitSeconds
-      );
-
-      updatedPlayers[playerId] = {
-        ...player,
-        score: player.score + BASE_SCORE + timeBonus,
-      };
-    }
-  }
-
-  const scoreDeltas: Record<string, number> = {};
-  for (const [playerId, nextPlayer] of Object.entries(updatedPlayers)) {
-    scoreDeltas[playerId] = nextPlayer.score - current.players[playerId].score;
-  }
-
-  const expectedIndex = current.currentQuestionIndex;
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'question') return r;
-    if (r.currentQuestionIndex !== expectedIndex) return r;
+    const question = r.questions[r.currentQuestionIndex];
+    if (!question || r.phaseEndsAt === null) return r;
+
+    const updatedPlayers = { ...r.players };
+    const timeLimitSeconds = r.settings.timePerQuestion;
+    const questionStartedAt = r.phaseEndsAt - timeLimitSeconds * 1000;
+
+    for (const [playerId, optionId] of Object.entries(r.answers)) {
+      if (optionId === question.correctOptionId) {
+        const player = updatedPlayers[playerId];
+        if (!player || player.answeredAt === undefined) continue;
+        const timeBonus = calculateTimeBonus(
+          player.answeredAt,
+          questionStartedAt,
+          timeLimitSeconds
+        );
+
+        updatedPlayers[playerId] = {
+          ...player,
+          score: player.score + BASE_SCORE + timeBonus,
+        };
+      }
+    }
+
+    scoreDeltas = {};
+    for (const [playerId, nextPlayer] of Object.entries(updatedPlayers)) {
+      scoreDeltas[playerId] = nextPlayer.score - r.players[playerId].score;
+    }
+
     return {
       ...r,
       phase: 'reveal',
@@ -167,21 +160,16 @@ export async function revealQuestion(roomId: string) {
       phaseEndsAt: Date.now() + REVEAL_DELAY_MS,
     };
   });
-  if (
-    updated.phase !== 'reveal' ||
-    updated.currentQuestionIndex !== expectedIndex
-  ) {
-    console.info(
-      `[engine] revealQuestion no-op room=${roomId} expectedIndex=${expectedIndex}`
-    );
-    return;
-  }
+
+  if (updated.phase !== 'reveal') return;
+
+  const question = updated.questions[updated.currentQuestionIndex];
 
   broadcast(roomId, {
     event: 'reveal',
     data: {
-      questionIndex: current.currentQuestionIndex,
-      totalQuestions: current.questions.length,
+      questionIndex: updated.currentQuestionIndex,
+      totalQuestions: updated.questions.length,
       question: {
         id: question.id,
         text: question.text,
@@ -200,20 +188,13 @@ export async function revealQuestion(roomId: string) {
 }
 
 export async function showLeaderboard(roomId: string) {
-  const room = await getRoom(roomId);
-  if (!room || room.phase !== 'reveal') return;
+  let isLastQuestion = false;
 
-  const isLastQuestion = room.currentQuestionIndex >= room.questions.length - 1;
-
-  if (isLastQuestion) {
-    await endGame(roomId);
-    return;
-  }
-
-  const expectedIndex = room.currentQuestionIndex;
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'reveal') return r;
-    if (r.currentQuestionIndex !== expectedIndex) return r;
+    isLastQuestion = r.currentQuestionIndex >= r.questions.length - 1;
+    if (isLastQuestion) return r;
+
     return {
       ...r,
       phase: 'leaderboard',
@@ -221,12 +202,13 @@ export async function showLeaderboard(roomId: string) {
       phaseEndsAt: Date.now() + LEADERBOARD_DELAY_MS,
     };
   });
-  if (updated.phase !== 'leaderboard') {
-    console.info(
-      `[engine] showLeaderboard no-op room=${roomId} expectedIndex=${expectedIndex}`
-    );
+
+  if (isLastQuestion) {
+    await endGame(roomId);
     return;
   }
+
+  if (updated.phase !== 'leaderboard') return;
 
   const ranked = rankedPlayers(updated.players);
 
@@ -245,9 +227,6 @@ export async function showLeaderboard(roomId: string) {
 }
 
 export async function endGame(roomId: string) {
-  const room = await getRoom(roomId);
-  if (!room || room.phase === 'ended') return;
-
   const endedRoom = await updateRoom(roomId, (r) => {
     if (r.phase === 'ended') return r;
     const ranked = rankedPlayers(r.players);
@@ -279,7 +258,8 @@ export async function endGame(roomId: string) {
   // Persist results BEFORE deleting the room so a DB failure leaves
   // recoverable state in Redis rather than silently destroying it.
   try {
-    await insertGameResult({
+    await db.insert(gameResults).values({
+      id: nanoid(),
       roomId,
       players: finalPlayers,
       settings: endedRoom.settings,

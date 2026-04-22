@@ -7,12 +7,7 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
 } from './constants';
-import {
-  requireHost,
-  requireMember,
-  requirePhase,
-  requireRoom,
-} from './guards';
+import { requireHost, requireMember, requirePhase } from './guards';
 import {
   codeKey,
   deleteRoom,
@@ -21,9 +16,10 @@ import {
   setRoom,
   toPublicState,
   updateRoom,
+  setRoomCode,
+  deleteRoomCode,
 } from './store';
 import type { InternalRoomState, Player, RoomSettings } from './types';
-import { linkCodeOrRollback, unlinkCodeBestEffort } from './code-index';
 import { getConnectedPlayers, countConnectedPlayers } from './selectors';
 import { broadcast } from '@/modules/sse/broadcaster';
 import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
@@ -76,7 +72,7 @@ export async function createRoom(params: {
       roomKey(id),
       codeKey(code),
       state
-    ).catch(() => false);
+    );
     if (created) return { id, code };
 
     // Fallback path for clients/environments where script may fail.
@@ -84,10 +80,15 @@ export async function createRoom(params: {
     if (existing) continue;
     await setRoom(state);
     try {
-      await linkCodeOrRollback(code, id);
+      await setRoomCode(code, id);
       return { id, code };
     } catch (error) {
-      await deleteRoom(id).catch(() => undefined);
+      await deleteRoom(id).catch((err) => {
+        console.error(
+          `[createRoom] failed to rollback room deletion for id=${id}`,
+          err
+        );
+      });
       throw error;
     }
   }
@@ -106,13 +107,6 @@ export async function joinRoom(params: {
   const roomId = await getRoomIdByCode(code);
   if (!roomId) throw jsonError(404, 'room_not_found');
 
-  const room = await requireRoom(roomId);
-  if (room.players[user.id]) return { id: roomId, code: room.code };
-  requirePhase(room, 'lobby');
-  if (Object.keys(room.players).length >= MAX_PLAYERS) {
-    throw jsonError(409, 'room_full');
-  }
-
   const player: Player = {
     id: user.id,
     name: user.name ?? 'Player',
@@ -125,8 +119,10 @@ export async function joinRoom(params: {
 
   const updated = await updateRoom(roomId, (r) => {
     if (r.players[user.id]) return r;
-    if (r.phase !== 'lobby') return r;
-    if (Object.keys(r.players).length >= MAX_PLAYERS) return r;
+    requirePhase(r, 'lobby');
+    if (Object.keys(r.players).length >= MAX_PLAYERS) {
+      throw jsonError(409, 'room_full');
+    }
     return {
       ...r,
       players: { ...r.players, [user.id]: player },
@@ -142,23 +138,22 @@ export async function setReady(params: {
   ready: boolean;
 }): Promise<void> {
   const { roomId, playerId, ready } = params;
-  const room = await requireRoom(roomId);
-  requireMember(room, playerId);
-  requirePhase(room, 'lobby');
+  let stateChanged = false;
+  await updateRoom(roomId, (r) => {
+    requireMember(r, playerId);
+    requirePhase(r, 'lobby');
 
-  if (room.players[playerId].ready === ready) return;
-
-  const updated = await updateRoom(roomId, (r) => {
-    if (r.phase !== 'lobby') return r;
     const player = r.players[playerId];
-    if (!player || player.ready === ready) return r;
+    if (player.ready === ready) return r;
+
+    stateChanged = true;
     return {
       ...r,
       players: { ...r.players, [playerId]: { ...player, ready } },
     };
   });
 
-  if (updated.players[playerId]?.ready !== room.players[playerId].ready) {
+  if (stateChanged) {
     broadcast(roomId, { event: 'ready_changed', data: { playerId, ready } });
   }
 }
@@ -169,16 +164,18 @@ export async function updateRoomSettings(params: {
   patch: Partial<RoomSettings>;
 }): Promise<void> {
   const { roomId, playerId, patch } = params;
-  const room = await requireRoom(roomId);
-  requireHost(room, playerId);
-  requirePhase(room, 'lobby');
-
+  let stateChanged = false;
   const updated = await updateRoom(roomId, (r) => {
-    if (r.phase !== 'lobby' || r.hostId !== playerId) return r;
+    requireHost(r, playerId);
+    requirePhase(r, 'lobby');
+
+    stateChanged = true;
     return { ...r, settings: { ...r.settings, ...patch } };
   });
 
-  broadcast(roomId, { event: 'settings_updated', data: updated.settings });
+  if (stateChanged) {
+    broadcast(roomId, { event: 'settings_updated', data: updated.settings });
+  }
 }
 
 export async function submitAnswer(params: {
@@ -187,27 +184,17 @@ export async function submitAnswer(params: {
   optionId: string;
 }) {
   const { roomId, playerId, optionId } = params;
-  const room = await requireRoom(roomId);
-  requireMember(room, playerId);
-  requirePhase(room, 'question');
-  const lockOnFirstSubmit = room.settings.answerMode === 'lock_on_first_submit';
-  if (lockOnFirstSubmit && room.answers[playerId] !== undefined) {
-    throw jsonError(409, 'already_answered');
-  }
-  if (room.phaseEndsAt !== null && Date.now() > room.phaseEndsAt) {
-    throw jsonError(410, 'phase_expired');
-  }
-
   const scripted = await submitAnswerAtomically(
     roomKey(roomId),
     playerId,
     optionId,
-    Date.now(),
-    lockOnFirstSubmit
+    Date.now()
   );
   if (scripted.status === 'not_found') throw jsonError(404, 'room_not_found');
   if (scripted.status === 'not_member') throw jsonError(403, 'not_a_member');
   if (scripted.status === 'wrong_phase') throw jsonError(409, 'wrong_phase');
+  if (scripted.status === 'phase_expired')
+    throw jsonError(410, 'phase_expired');
   if (scripted.status === 'already_answered') {
     throw jsonError(409, 'already_answered');
   }
@@ -227,6 +214,9 @@ export async function submitAnswer(params: {
     },
   });
 
+  // Re-read settings from the updated state inside scripted.room
+  const lockOnFirstSubmit =
+    updated.settings.answerMode === 'lock_on_first_submit';
   if (lockOnFirstSubmit && checkAllAnswered(updated)) {
     await revealQuestion(roomId);
   }
@@ -237,31 +227,40 @@ export async function leaveRoom(params: {
   playerId: string;
 }): Promise<void> {
   const { roomId, playerId } = params;
-  const room = await requireRoom(roomId);
-  requireMember(room, playerId);
+  let wasHost = false;
+  let codeToDelete = '';
+  const updated = await updateRoom(roomId, (r) => {
+    requireMember(r, playerId);
+
+    const players = { ...r.players };
+    delete players[playerId];
+    const remainingIds = Object.keys(players);
+    if (remainingIds.length === 0) {
+      codeToDelete = r.code;
+      return { ...r, players }; // Room will be deleted after update
+    }
+
+    wasHost = r.hostId === playerId;
+    const nextHostId = wasHost ? remainingIds[0] : r.hostId;
+    return { ...r, hostId: nextHostId, players };
+  });
+
   cancelOfflineRemovalTimer(roomId, playerId);
 
-  const remainingIds = Object.keys(room.players).filter(
-    (id) => id !== playerId
-  );
-  if (remainingIds.length === 0) {
-    await deleteRoomAndCode(roomKey(roomId), codeKey(room.code)).catch(
+  if (Object.keys(updated.players).length === 0) {
+    await deleteRoomAndCode(roomKey(roomId), codeKey(codeToDelete)).catch(
       async () => {
         await deleteRoom(roomId);
-        await unlinkCodeBestEffort(room.code, 'room:leave');
+        await deleteRoomCode(codeToDelete).catch((err) => {
+          console.error(
+            `[leaveRoom] failed to delete room code=${codeToDelete}`,
+            err
+          );
+        });
       }
     );
     return;
   }
-
-  const wasHost = room.hostId === playerId;
-  const nextHostId = wasHost ? remainingIds[0] : room.hostId;
-  const updated = await updateRoom(roomId, (r) => {
-    if (!r.players[playerId]) return r;
-    const players = { ...r.players };
-    delete players[playerId];
-    return { ...r, hostId: nextHostId, players };
-  });
 
   broadcast(roomId, {
     event: 'player_removed',
@@ -278,14 +277,12 @@ export async function kickPlayer(params: {
   targetId: string;
 }): Promise<void> {
   const { roomId, hostId, targetId } = params;
-  const room = await requireRoom(roomId);
-  requireHost(room, hostId);
-  requirePhase(room, 'lobby');
-  if (targetId === hostId) throw jsonError(400, 'cannot_kick_self');
-  if (!room.players[targetId]) throw jsonError(404, 'target_not_member');
-
   await updateRoom(roomId, (r) => {
-    if (!r.players[targetId]) return r;
+    requireHost(r, hostId);
+    requirePhase(r, 'lobby');
+    if (targetId === hostId) throw jsonError(400, 'cannot_kick_self');
+    if (!r.players[targetId]) throw jsonError(404, 'target_not_member');
+
     const players = { ...r.players };
     delete players[targetId];
     return { ...r, players };
@@ -300,20 +297,23 @@ export async function startRoomGame(params: {
   playerId: string;
 }): Promise<void> {
   const { roomId, playerId } = params;
-  const room = await requireRoom(roomId);
-  requireHost(room, playerId);
-  requirePhase(room, 'lobby');
+  const updated = await updateRoom(roomId, (r) => {
+    requireHost(r, playerId);
+    requirePhase(r, 'lobby');
 
-  const connected = getConnectedPlayers(room.players);
-  if (connected.length < MIN_PLAYERS) {
-    throw jsonError(
-      409,
-      'not_enough_players',
-      `At least ${MIN_PLAYERS} connected players are required to start.`
-    );
-  }
-  const pending = connected.filter((p) => p.id !== room.hostId && !p.ready);
-  if (pending.length > 0) throw jsonError(409, 'not_all_ready');
+    const connected = getConnectedPlayers(r.players);
+    if (connected.length < MIN_PLAYERS) {
+      throw jsonError(
+        409,
+        'not_enough_players',
+        `At least ${MIN_PLAYERS} connected players are required to start.`
+      );
+    }
+    const pending = connected.filter((p) => p.id !== r.hostId && !p.ready);
+    if (pending.length > 0) throw jsonError(409, 'not_all_ready');
 
-  await startGame(roomId);
+    return r; // Validation passed, return unmodified to skip write
+  });
+
+  await startGame(roomId, updated.settings);
 }

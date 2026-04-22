@@ -19,20 +19,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function normalizeRoomVersion(state: InternalRoomState): InternalRoomState {
-  return {
-    ...state,
-    version: typeof state.version === 'number' ? state.version : 0,
-  };
-}
-
 export async function getRoom(id: string): Promise<InternalRoomState | null> {
   const state = await redis.get<InternalRoomState>(roomKey(id));
-  return state ? normalizeRoomVersion(state) : null;
+  return state ? state : null;
 }
 
 export async function setRoom(state: InternalRoomState): Promise<void> {
-  await redis.set(roomKey(state.id), normalizeRoomVersion(state), {
+  await redis.set(roomKey(state.id), state, {
     ex: ROOM_TTL_SECONDS,
   });
 }
@@ -44,7 +37,14 @@ export async function updateRoomWithRetry(
   for (let attempt = 0; attempt < ROOM_UPDATE_MAX_RETRIES; attempt++) {
     const current = await getRoom(id);
     if (!current) throw new Error('Room not found');
-    const updated = normalizeRoomVersion(updater(current));
+    const updated = updater(current);
+
+    // If the updater returns the exact same object reference, assume no changes
+    // and skip the redundant write to Redis.
+    if (updated === current) {
+      return current;
+    }
+
     const next = {
       ...updated,
       version: current.version + 1,
