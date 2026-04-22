@@ -25,13 +25,14 @@ export type UseRoomSseResult = {
   state: RoomState | null;
   /** Connection-level status only. */
   status: RoomSseStatus;
-  /** `true` until the first `state_sync` is received. Never flips back to
-   *  `true` once it has been `false`, even across reconnects (reconnects
-   *  just re-sync and replace state). */
+  /** True only while waiting for the *initial* `state_sync`. After that stays
+   *  false so transient reconnects don't flash skeletons. */
   loading: boolean;
-  /** Most recent server-sent `error` event message, or `null`. Not related
-   *  to `status === 'error'`. */
+  /** App-level error message from an SSE `error` event (rare). */
   error: string | null;
+  /** True when the server sent a terminal error (e.g. `not_a_member`) and the
+   *  EventSource has been permanently closed. The UI should redirect. */
+  removed: boolean;
 };
 
 /**
@@ -45,7 +46,10 @@ export type UseRoomSseResult = {
  * will bring us to a consistent baseline and subsequent events will apply
  * cleanly.
  */
-function applyEvent(prev: RoomState | null, event: SSEEvent): RoomState | null {
+export function applyEvent(
+  prev: RoomState | null,
+  event: SSEEvent
+): RoomState | null {
   if (event.event === 'state_sync') {
     return event.data;
   }
@@ -176,11 +180,15 @@ function applyEvent(prev: RoomState | null, event: SSEEvent): RoomState | null {
  * - **Single source of truth**: no other code in the app should fetch or
  *   cache room state. Consumers read exclusively from this hook.
  */
-export function useRoomSse(roomId: string): UseRoomSseResult {
+export function useRoomSse(
+  roomId: string,
+  selfId?: string | null
+): UseRoomSseResult {
   const [state, setState] = useState<RoomState | null>(null);
   const [status, setStatus] = useState<RoomSseStatus>('connecting');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [appError, setAppError] = useState<string | null>(null);
+  const [removed, setRemoved] = useState(false);
 
   // Reset state when `roomId` changes — canonical "reset during render" pattern
   // (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
@@ -193,7 +201,8 @@ export function useRoomSse(roomId: string): UseRoomSseResult {
     setState(null);
     setStatus('connecting');
     setLoading(true);
-    setError(null);
+    setAppError(null);
+    setRemoved(false);
   }
 
   useEffect(() => {
@@ -234,7 +243,25 @@ export function useRoomSse(roomId: string): UseRoomSseResult {
         const event = { event: name, data } as SSEEvent;
 
         if (event.event === 'error') {
-          setError(event.data.message);
+          setAppError(event.data.message);
+          // Terminal errors: close the stream permanently so the browser
+          // stops auto-reconnecting, and signal the UI to redirect.
+          if (
+            event.data.message === 'not_a_member' ||
+            event.data.message === 'room_not_found'
+          ) {
+            es.close();
+            setRemoved(true);
+          }
+          return;
+        }
+
+        // If we are the kicked player, close the stream immediately and
+        // signal removal so the UI can redirect before the browser even
+        // attempts to reconnect (which would hit not_a_member anyway).
+        if (event.event === 'player_kicked' && event.data.playerId === selfId) {
+          es.close();
+          setRemoved(true);
           return;
         }
 
@@ -277,7 +304,7 @@ export function useRoomSse(roomId: string): UseRoomSseResult {
       }
       es.close();
     };
-  }, [roomId]);
+  }, [roomId, selfId]);
 
-  return { state, status, loading, error };
+  return { state, status, loading, error: appError, removed };
 }

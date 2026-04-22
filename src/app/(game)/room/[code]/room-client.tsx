@@ -156,11 +156,20 @@ function RoomEntryGate({ roomId, roomCode }: RoomClientProps) {
 }
 
 function RoomLive({ roomId }: { roomId: string }) {
-  const { state, status, loading, error } = useRoomSse(roomId);
   const session = authClient.useSession();
   const selfId = session.data?.user?.id ?? null;
+  const { state, status, loading, error, removed } = useRoomSse(roomId, selfId);
+  const router = useRouter();
 
-  // 1. Connecting / first-state-sync pending → skeleton shell.
+  // 1. Kicked / room deleted — terminal state. Redirect to home page
+  //    immediately so the user never sees the "Reconnecting..." bar.
+  useEffect(() => {
+    if (removed) {
+      router.push('/?kicked=true');
+    }
+  }, [removed, router]);
+
+  // 2. Connecting / first-state-sync pending → skeleton shell.
   //    Note: once `loading` flips false it stays false across reconnects,
   //    so transient network blips do NOT bounce the UI back to a skeleton.
   if (loading || !state) {

@@ -4,6 +4,15 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { parseApiError } from '@/lib/api/client';
 import type { RoomSettings } from '@/modules/room/types';
@@ -25,6 +34,17 @@ const CATEGORY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
 
 const QUESTION_COUNT_OPTIONS = [5, 10, 15, 20] as const;
 const TIME_PER_QUESTION_OPTIONS = [10, 20, 30] as const;
+
+const ANSWER_MODE_OPTIONS: ReadonlyArray<{
+  value: RoomSettings['answerMode'];
+  label: string;
+}> = [
+  {
+    value: 'allow_changes_until_deadline',
+    label: 'Allow changes until deadline',
+  },
+  { value: 'lock_on_first_submit', label: 'Lock on first submit' },
+];
 
 type SettingsPanelProps = {
   roomId: string;
@@ -112,6 +132,46 @@ export function SettingsPanel({ roomId, settings }: SettingsPanelProps) {
             </OptionButton>
           ))}
         </SettingGroup>
+
+        <SettingGroup label="Answer mode" disabled={pending === 'answerMode'}>
+          <Select
+            value={settings.answerMode}
+            onValueChange={(v) =>
+              patch('answerMode', v as RoomSettings['answerMode'])
+            }
+            disabled={pending === 'answerMode'}
+          >
+            <SelectTrigger className="w-full" aria-label="Answer mode">
+              <SelectValue placeholder="Select answer mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {ANSWER_MODE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </SettingGroup>
+
+        <div
+          className={cn(
+            'flex items-center justify-between gap-3',
+            pending === 'isPublic' && 'opacity-60'
+          )}
+        >
+          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Public room
+          </Label>
+          <Switch
+            checked={settings.isPublic}
+            onCheckedChange={(checked) => patch('isPublic', checked)}
+            disabled={pending === 'isPublic'}
+            aria-label="Public room"
+          />
+        </div>
 
         {error && (
           <p className="text-xs text-destructive" role="alert">

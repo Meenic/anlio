@@ -1,19 +1,35 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { MAX_PLAYERS } from '@/modules/room/constants';
+import { parseApiError } from '@/lib/api/client';
 import type { Player } from '@/modules/room/types';
-import { Check, Crown, WifiOff } from 'lucide-react';
+import { Check, Crown, WifiOff, UserX } from 'lucide-react';
 
 type PlayerListProps = {
   players: Record<string, Player>;
   hostId: string;
   selfId: string | null;
+  roomId: string;
 };
 
-export function PlayerList({ players, hostId, selfId }: PlayerListProps) {
+export function PlayerList({
+  players,
+  hostId,
+  selfId,
+  roomId,
+}: PlayerListProps) {
+  const isHost = selfId === hostId;
+
   // Stable order: host first, then by name. Using `id` as final tiebreaker
   // guarantees deterministic render across re-renders.
   const sorted = Object.values(players).sort((a, b) => {
@@ -41,6 +57,8 @@ export function PlayerList({ players, hostId, selfId }: PlayerListProps) {
             player={p}
             isHost={p.id === hostId}
             isSelf={p.id === selfId}
+            canKick={isHost && p.id !== hostId && p.id !== selfId}
+            roomId={roomId}
           />
         ))}
       </CardContent>
@@ -52,14 +70,42 @@ function PlayerRow({
   player,
   isHost,
   isSelf,
+  canKick,
+  roomId,
 }: {
   player: Player;
   isHost: boolean;
   isSelf: boolean;
+  canKick: boolean;
+  roomId: string;
 }) {
+  const [kicking, setKicking] = useState(false);
+  const [kickError, setKickError] = useState<string | null>(null);
   const initial = player.name.charAt(0).toUpperCase();
 
-  return (
+  async function handleKick() {
+    if (kicking) return;
+    setKicking(true);
+    setKickError(null);
+    try {
+      const res = await fetch(`/api/room/${roomId}/kick`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId: player.id }),
+      });
+      if (!res.ok) {
+        throw new Error(
+          await parseApiError(res, `Failed to kick player (${res.status})`)
+        );
+      }
+    } catch (e) {
+      setKickError(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setKicking(false);
+    }
+  }
+
+  const rowContent = (
     <div
       className={cn(
         'flex items-center gap-3 rounded-2xl transition-opacity',
@@ -106,6 +152,51 @@ function PlayerRow({
           </Badge>
         )}
       </div>
+    </div>
+  );
+
+  if (!canKick) {
+    return (
+      <div className="flex flex-col gap-1">
+        {rowContent}
+        {kickError && (
+          <p className="text-xs text-destructive" role="alert">
+            {kickError}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            disabled={kicking}
+            className="cursor-pointer text-left"
+            aria-label={`Options for ${player.name}`}
+          >
+            {rowContent}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={handleKick}
+            disabled={kicking}
+          >
+            <UserX />
+            Kick player
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {kickError && (
+        <p className="text-xs text-destructive" role="alert">
+          {kickError}
+        </p>
+      )}
     </div>
   );
 }
