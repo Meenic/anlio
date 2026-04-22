@@ -9,9 +9,9 @@ import {
   roomKey,
 } from '@/modules/room/store';
 import { deleteRoomAndCode } from '@/modules/room/redis-scripts';
-import { unlinkCodeBestEffort } from '@/modules/room/code-index';
 import { broadcast } from './broadcaster';
 import { registry } from './registry';
+import { deleteRoomCode } from '@/modules/room/store';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -111,7 +111,12 @@ async function removeIfStillOffline(
     await deleteRoomAndCode(roomKey(roomId), codeKey(room.code)).catch(
       async () => {
         await deleteRoom(roomId).catch(() => undefined);
-        await unlinkCodeBestEffort(room.code, 'offline-removal');
+        await deleteRoomCode(room.code).catch((err) => {
+          console.error(
+            `[offline-removal] failed to delete room code=${room.code}`,
+            err
+          );
+        });
       }
     );
     return;

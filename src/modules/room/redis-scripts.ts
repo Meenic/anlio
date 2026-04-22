@@ -72,6 +72,7 @@ export type SubmitAnswerResult =
       status:
         | 'not_found'
         | 'wrong_phase'
+        | 'phase_expired'
         | 'not_member'
         | 'already_answered'
         | 'conflict';
@@ -81,14 +82,19 @@ export async function submitAnswerAtomically(
   roomRedisKey: string,
   playerId: string,
   optionId: string,
-  answeredAt: number,
-  lockOnFirstSubmit: boolean
+  answeredAt: number
 ): Promise<SubmitAnswerResult> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const room = await redis.get<InternalRoomState>(roomRedisKey);
     if (!room) return { status: 'not_found' };
     if (room.phase !== 'question') return { status: 'wrong_phase' };
     if (!room.players[playerId]) return { status: 'not_member' };
+    if (room.phaseEndsAt !== null && Date.now() > room.phaseEndsAt) {
+      return { status: 'phase_expired' };
+    }
+
+    const lockOnFirstSubmit =
+      room.settings.answerMode === 'lock_on_first_submit';
     if (lockOnFirstSubmit && room.answers[playerId] !== undefined) {
       return { status: 'already_answered' };
     }
@@ -131,8 +137,8 @@ export async function createRoomWithCodeIfAbsent(
 if redis.call("EXISTS", KEYS[1]) == 1 then
   return 0
 end
-redis.call("SET", KEYS[2], ARGV[1], "EX", tonumber(ARGV[2]))
-redis.call("SET", KEYS[1], ARGV[3], "EX", tonumber(ARGV[2]))
+redis.call("SET", KEYS[2], ARGV[3], "EX", tonumber(ARGV[2]))
+redis.call("SET", KEYS[1], ARGV[1], "EX", tonumber(ARGV[2]))
 return 1
 `,
     [codeRedisKey, roomRedisKey],
