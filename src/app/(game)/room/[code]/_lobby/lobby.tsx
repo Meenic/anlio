@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { MIN_PLAYERS } from '@/modules/room/constants';
 import { parseApiError } from '@/lib/api/client';
@@ -9,7 +10,7 @@ import type { RoomState } from '@/modules/room/types';
 import { PlayerList } from './player-list';
 import { SettingsPanel } from './settings-panel';
 import { RoomCode } from './room-code';
-import { Play } from 'lucide-react';
+import { Play, LogOut } from 'lucide-react';
 
 type LobbyProps = {
   room: RoomState;
@@ -28,17 +29,74 @@ export function Lobby({ room, selfId }: LobbyProps) {
           players={room.players}
           hostId={room.hostId}
           selfId={selfId}
+          roomId={room.id}
         />
         {isHost && <SettingsPanel roomId={room.id} settings={room.settings} />}
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex items-start justify-between">
+        <LeaveButton roomId={room.id} />
         {isHost ? (
           <StartButton room={room} />
         ) : (
           <ReadyButton room={room} selfId={selfId} />
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Host: start button
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Leave room button (host or non-host)
+// ---------------------------------------------------------------------------
+
+function LeaveButton({ roomId }: { roomId: string }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleLeave() {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/room/${roomId}/leave`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        throw new Error(
+          await parseApiError(res, `Failed to leave room (${res.status})`)
+        );
+      }
+      router.push('/');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.');
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-2">
+      {error && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      <Button
+        size="lg"
+        variant="outline"
+        onClick={handleLeave}
+        disabled={pending}
+      >
+        <LogOut />
+        {pending ? 'Leaving…' : 'Leave room'}
+      </Button>
     </div>
   );
 }

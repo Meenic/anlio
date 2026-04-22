@@ -429,6 +429,28 @@ describe('POST /api/room/:id/settings', () => {
     expect(res.status).toBe(409);
     expect((await parseJson<{ error: string }>(res)).error).toBe('wrong_phase');
   });
+
+  it('round-trips hidden settings (answerMode and isPublic)', async () => {
+    seedRoom(baseRoom());
+    const res = await settingsPOST(
+      makeRequest(
+        { answerMode: 'lock_on_first_submit', isPublic: true },
+        'host-1'
+      ),
+      makeParams('room-id')
+    );
+    expect(res.status).toBe(204);
+    const room = await memoryRedis.get<InternalRoomState>('room:room-id');
+    expect(room!.settings.answerMode).toBe('lock_on_first_submit');
+    expect(room!.settings.isPublic).toBe(true);
+    expect(
+      broadcastLog.some(
+        (b) =>
+          b.roomId === 'room-id' &&
+          (b.message as BroadcastMessage).event === 'settings_updated'
+      )
+    ).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -517,6 +539,30 @@ describe('POST /api/room/:id/kick', () => {
     );
     expect(res.status).toBe(409);
     expect((await parseJson<{ error: string }>(res)).error).toBe('wrong_phase');
+  });
+
+  it('returns 404 when target leaves before kick is processed', async () => {
+    seedRoom(
+      baseRoom({
+        players: {
+          'host-1': makePlayer('host-1', { ready: true }),
+          'player-1': makePlayer('player-1'),
+        },
+      })
+    );
+    // Simulate the player leaving (race condition) by removing them from the store
+    const room = await memoryRedis.get<InternalRoomState>('room:room-id');
+    delete room!.players['player-1'];
+    await memoryRedis.set('room:room-id', room);
+
+    const res = await kickPOST(
+      makeRequest({ targetId: 'player-1' }, 'host-1'),
+      makeParams('room-id')
+    );
+    expect(res.status).toBe(404);
+    expect((await parseJson<{ error: string }>(res)).error).toBe(
+      'target_not_member'
+    );
   });
 });
 
@@ -669,6 +715,25 @@ describe('POST /api/room/:id/leave', () => {
           (b.message as BroadcastMessage).event === 'state_sync'
       )
     ).toBe(true);
+  });
+
+  it('allows leaving even when not in lobby phase', async () => {
+    seedRoom(
+      baseRoom({
+        phase: 'question',
+        players: {
+          'host-1': makePlayer('host-1', { ready: true }),
+          'player-1': makePlayer('player-1'),
+        },
+      })
+    );
+    const res = await leavePOST(
+      makeRequest({}, 'player-1'),
+      makeParams('room-id')
+    );
+    expect(res.status).toBe(204);
+    const room = await memoryRedis.get<InternalRoomState>('room:room-id');
+    expect(room!.players['player-1']).toBeUndefined();
   });
 });
 

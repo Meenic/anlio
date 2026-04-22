@@ -4,7 +4,6 @@ import { broadcast, pingClient, sendToPlayer } from '@/modules/sse/broadcaster';
 import {
   HttpError,
   httpErrorToResponse,
-  jsonError,
   requireAuth,
 } from '@/lib/api/validate';
 import { countConnectedPlayers } from '@/modules/room/selectors';
@@ -16,6 +15,29 @@ import {
 /** Heartbeat interval in ms. Short enough to catch dead sockets quickly,
  *  long enough not to waste bandwidth. */
 const HEARTBEAT_INTERVAL_MS = 15_000;
+
+/** Return a minimal SSE stream that emits a single `error` event and then
+ *  closes. Used for fatal pre-flight rejections (room not found, not a member)
+ *  so the client can handle them gracefully instead of getting a plain JSON
+ *  response that the browser's EventSource cannot parse. */
+function sseErrorStream(message: string): Response {
+  const stream = new ReadableStream({
+    start(controller) {
+      const payload = JSON.stringify({ message });
+      controller.enqueue(
+        new TextEncoder().encode(`event: error\ndata: ${payload}\n\n`)
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
+}
 
 export async function GET(
   request: Request,
@@ -37,9 +59,9 @@ export async function GET(
   // The player must already exist in the room (added via the join/create flow).
   // Refuse otherwise to avoid creating ghost player entries in Redis.
   const initialRoom = await getRoom(roomId);
-  if (!initialRoom) return jsonError(404, 'room_not_found');
+  if (!initialRoom) return sseErrorStream('room_not_found');
   if (!initialRoom.players[playerId]) {
-    return jsonError(403, 'not_a_member');
+    return sseErrorStream('not_a_member');
   }
 
   const stream = new ReadableStream({
