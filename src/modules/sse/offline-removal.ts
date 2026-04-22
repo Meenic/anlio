@@ -109,8 +109,17 @@ async function removeIfStillOffline(
 
   if (Object.keys(updated.players).length === 0) {
     await deleteRoomAndCode(roomKey(roomId), codeKey(room.code)).catch(
-      async () => {
-        await deleteRoom(roomId).catch(() => undefined);
+      async (err) => {
+        console.warn(
+          `[offline-removal] deleteRoomAndCode failed, falling back to individual deletes room=${roomId}`,
+          err
+        );
+        await deleteRoom(roomId).catch((err) => {
+          console.error(
+            `[offline-removal] failed to delete room=${roomId}`,
+            err
+          );
+        });
         await deleteRoomCode(room.code).catch((err) => {
           console.error(
             `[offline-removal] failed to delete room code=${room.code}`,

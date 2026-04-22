@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRoomSse } from '@/hooks/use-room-sse';
 import { authClient } from '@/lib/auth-client';
@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { NameDialog } from '@/components/marketing/name-dialog';
 import { Lobby } from './_lobby/lobby';
 import { Loader2, WifiOff } from 'lucide-react';
+import { useNameDialog } from '@/hooks/use-name-dialog';
 
 type RoomClientProps = {
   roomId: string;
@@ -152,36 +153,6 @@ function RoomEntryGate({ roomId, roomCode }: RoomClientProps) {
       />
     </>
   );
-}
-
-type NameDialogResolver = (name: string | null) => void;
-
-function useNameDialog() {
-  const [open, setOpen] = useState(false);
-  const resolverRef = useRef<NameDialogResolver | null>(null);
-
-  const promptName = useCallback((): Promise<string | null> => {
-    return new Promise((resolve) => {
-      resolverRef.current = resolve;
-      setOpen(true);
-    });
-  }, []);
-
-  const handleConfirm = useCallback((name: string) => {
-    resolverRef.current?.(name);
-    resolverRef.current = null;
-    setOpen(false);
-  }, []);
-
-  const handleOpenChange = useCallback((next: boolean) => {
-    if (!next) {
-      resolverRef.current?.(null);
-      resolverRef.current = null;
-    }
-    setOpen(next);
-  }, []);
-
-  return { open, promptName, handleConfirm, handleOpenChange };
 }
 
 function RoomLive({ roomId }: { roomId: string }) {

@@ -1,6 +1,7 @@
-import { requireAuth, validateBody } from '@/lib/api/validate';
+import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
 import { withApiErrors } from '@/lib/api/with-api-errors';
-import { updateRoomSettings } from '@/modules/room/service';
+import { updateRoom } from '@/modules/room/store';
+import { broadcast } from '@/modules/sse/broadcaster';
 import { UpdateSettingsSchema } from '../../schemas';
 
 export async function POST(
@@ -9,14 +10,21 @@ export async function POST(
 ) {
   return withApiErrors(async () => {
     const { id: roomId } = await params;
-
-    // 1. Auth
     const { id: playerId } = await requireAuth(request);
-
-    // 2. Validate + guard
     const patch = await validateBody(request, UpdateSettingsSchema);
 
-    await updateRoomSettings({ roomId, playerId, patch });
+    let stateChanged = false;
+    const updated = await updateRoom(roomId, (r) => {
+      if (r.hostId !== playerId) throw jsonError(403, 'not_host');
+      if (r.phase !== 'lobby') throw jsonError(409, 'wrong_phase');
+
+      stateChanged = true;
+      return { ...r, settings: { ...r.settings, ...patch } };
+    });
+
+    if (stateChanged) {
+      broadcast(roomId, { event: 'settings_updated', data: updated.settings });
+    }
 
     return new Response(null, { status: 204 });
   });

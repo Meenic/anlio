@@ -1,6 +1,8 @@
-import { requireAuth, validateBody } from '@/lib/api/validate';
+import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
 import { withApiErrors } from '@/lib/api/with-api-errors';
-import { kickPlayer } from '@/modules/room/service';
+import { updateRoom } from '@/modules/room/store';
+import { broadcast } from '@/modules/sse/broadcaster';
+import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
 import { registry, unregisterClient } from '@/modules/sse/registry';
 import { KickSchema } from '../../schemas';
 
@@ -10,20 +12,24 @@ export async function POST(
 ) {
   return withApiErrors(async () => {
     const { id: roomId } = await params;
-
-    // 1. Auth
     const { id: playerId } = await requireAuth(request);
-
-    // 2. Validate + guard
     const { targetId } = await validateBody(request, KickSchema);
 
-    await kickPlayer({ roomId, hostId: playerId, targetId });
+    await updateRoom(roomId, (r) => {
+      if (r.hostId !== playerId) throw jsonError(403, 'not_host');
+      if (r.phase !== 'lobby') throw jsonError(409, 'wrong_phase');
+      if (targetId === playerId) throw jsonError(400, 'cannot_kick_self');
+      if (!r.players[targetId]) throw jsonError(404, 'target_not_member');
 
-    // Force-close the kicked player's SSE stream. Closing the controller
-    // directly does NOT fire `request.signal.abort`, so the SSE route's
-    // heartbeat will eventually run its own cleanup — the `if (!players[id])`
-    // guard in that cleanup (added for exactly this case) prevents a
-    // zombie-player resurrection.
+      const players = { ...r.players };
+      delete players[targetId];
+      return { ...r, players };
+    });
+
+    cancelOfflineRemovalTimer(roomId, targetId);
+    broadcast(roomId, { event: 'player_kicked', data: { playerId: targetId } });
+
+    // Force-close the kicked player's SSE stream.
     const controller = registry.get(roomId)?.get(targetId);
     try {
       controller?.close();

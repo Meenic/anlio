@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,35 +43,7 @@ function useBfcacheReset(reset: () => void) {
  * entry points. One dialog is enough because only one action can be pending
  * at a time (user has to dismiss or confirm before trying the other).
  */
-function useNameDialog() {
-  const [open, setOpen] = useState(false);
-  const resolverRef = useRef<((name: string | null) => void) | null>(null);
-
-  function promptName(): Promise<string | null> {
-    return new Promise((resolve) => {
-      resolverRef.current = resolve;
-      setOpen(true);
-    });
-  }
-
-  function handleConfirm(name: string) {
-    resolverRef.current?.(name);
-    resolverRef.current = null;
-    setOpen(false);
-  }
-
-  function handleOpenChange(next: boolean) {
-    if (!next) {
-      // Any close path (Escape, backdrop, Cancel) without an explicit confirm
-      // resolves with null — the caller treats this as an abort.
-      resolverRef.current?.(null);
-      resolverRef.current = null;
-    }
-    setOpen(next);
-  }
-
-  return { open, promptName, handleConfirm, handleOpenChange };
-}
+import { useNameDialog } from '@/hooks/use-name-dialog';
 
 // ---------------------------------------------------------------------------
 // Create Room

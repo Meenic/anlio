@@ -14,7 +14,8 @@ export function broadcast(roomId: string, event: SSEEvent) {
   for (const [playerId, controller] of clients) {
     try {
       controller.enqueue(chunk);
-    } catch {
+    } catch (err) {
+      console.warn('[sse] dead socket on broadcast', { roomId, playerId, err });
       clients.delete(playerId); // Clean up dead connections
     }
   }
@@ -32,7 +33,8 @@ export function pingClient(roomId: string, playerId: string): boolean {
   try {
     controller.enqueue(encoder.encode(`: ping\n\n`));
     return true;
-  } catch {
+  } catch (err) {
+    console.warn('[sse] dead socket on ping', { roomId, playerId, err });
     return false;
   }
 }
@@ -51,7 +53,12 @@ export function sendToPlayer(
         `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
       )
     );
-  } catch {
+  } catch (err) {
+    console.warn('[sse] dead socket on sendToPlayer', {
+      roomId,
+      playerId,
+      err,
+    });
     registry.get(roomId)?.delete(playerId);
   }
 }
