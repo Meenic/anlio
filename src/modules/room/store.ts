@@ -1,23 +1,27 @@
 import { redis } from '@/lib/redis';
 import { ROOM_TTL_SECONDS } from './constants';
 import type { InternalRoomState, RoomState } from './types';
+import type { Question } from '@/modules/game/types';
 import { cacheLife, cacheTag } from 'next/cache';
-import { updateRoomIfVersion } from './redis-scripts';
+import { withRoomLock } from './mutex';
 
 export const roomKey = (id: string) => `room:${id}`;
 export const codeKey = (code: string) => `code:${code}`;
-const ROOM_UPDATE_MAX_RETRIES = 5;
-const ROOM_UPDATE_BACKOFF_MS = 25;
+/** Dedicated key for the ~20 KB question bank. Written once per game at
+ *  `startGame`, read by the engine on every phase transition. Kept out of
+ *  the main `roomKey` payload so hot-path writes stay tiny. */
+export const roomQuestionsKey = (id: string) => `room:${id}:questions`;
 
+/**
+ * Kept for API-compatibility with code paths that still catch it, but now
+ * only thrown in the "room disappeared mid-transaction" race. The legacy
+ * optimistic-CAS retry loop is gone — see `./mutex.ts` for why.
+ */
 export class RoomConflictError extends Error {
   constructor(message = 'Room update conflict') {
     super(message);
     this.name = 'RoomConflictError';
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function getRoom(id: string): Promise<InternalRoomState | null> {
@@ -31,44 +35,31 @@ export async function setRoom(state: InternalRoomState): Promise<void> {
   });
 }
 
+/**
+ * Read-modify-write the room state under the per-room mutex.
+ *
+ * Because every mutation from this process runs serially per roomId (see
+ * `./mutex.ts`), we no longer need version-checked writes — the GET/SET
+ * pair is the hot path now, and we skip any Lua round-trip.
+ *
+ * The updater may return the exact same object reference to signal "no
+ * change"; in that case we skip the Redis write entirely.
+ */
 export async function updateRoom(
   id: string,
   updater: (state: InternalRoomState) => InternalRoomState
 ): Promise<InternalRoomState> {
-  for (let attempt = 0; attempt < ROOM_UPDATE_MAX_RETRIES; attempt++) {
+  return withRoomLock(id, async () => {
     const current = await getRoom(id);
     if (!current) throw new Error('Room not found');
+
     const updated = updater(current);
+    if (updated === current) return current;
 
-    // If the updater returns the exact same object reference, assume no changes
-    // and skip the redundant write to Redis.
-    if (updated === current) {
-      return current;
-    }
-
-    const next = {
-      ...updated,
-      version: current.version + 1,
-    };
-    const committed = await updateRoomIfVersion(
-      roomKey(id),
-      current.version,
-      next,
-      ROOM_TTL_SECONDS
-    ).catch(() => false);
-    if (committed) {
-      return next;
-    }
-
-    await sleep(ROOM_UPDATE_BACKOFF_MS * (attempt + 1));
-  }
-
-  console.warn(
-    `[room-store] update conflict after retries room=${id} retries=${ROOM_UPDATE_MAX_RETRIES}`
-  );
-  throw new RoomConflictError(
-    `Failed to update room ${id} after ${ROOM_UPDATE_MAX_RETRIES} retries`
-  );
+    const next = { ...updated, version: current.version + 1 };
+    await setRoom(next);
+    return next;
+  });
 }
 
 export async function deleteRoom(id: string): Promise<void> {
@@ -91,11 +82,31 @@ export async function tryUpdateRoom(
 }
 
 export function toPublicState(internalState: InternalRoomState): RoomState {
-  const { questions: _q, answers, ...publicState } = internalState;
+  const { answers, ...publicState } = internalState;
   return {
     ...publicState,
     answerCount: Object.keys(answers).length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Questions (separate Redis key — see `roomQuestionsKey` comment)
+// ---------------------------------------------------------------------------
+
+export async function getQuestions(id: string): Promise<Question[] | null> {
+  const value = await redis.get<Question[]>(roomQuestionsKey(id));
+  return value ?? null;
+}
+
+export async function setQuestions(
+  id: string,
+  questions: Question[]
+): Promise<void> {
+  await redis.set(roomQuestionsKey(id), questions, { ex: ROOM_TTL_SECONDS });
+}
+
+export async function deleteQuestions(id: string): Promise<void> {
+  await redis.del(roomQuestionsKey(id));
 }
 
 // ---------------------------------------------------------------------------

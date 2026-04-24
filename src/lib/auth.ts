@@ -9,7 +9,9 @@ export const auth = betterAuth({
   session: {
     cookieCache: {
       enabled: true,
-      maxAge: 60, // 1 minute
+      // 10 minutes — signed cookie short-circuits the DB session lookup in
+      // `requireAuth`. Revocation still propagates on explicit signout.
+      maxAge: 60 * 10,
     },
   },
   database: drizzleAdapter(db, {

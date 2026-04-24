@@ -1,6 +1,10 @@
 import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
 import { withApiErrors } from '@/lib/api/with-api-errors';
-import { updateRoom, toPublicState } from '@/modules/room/store';
+import {
+  deleteQuestions,
+  updateRoom,
+  toPublicState,
+} from '@/modules/room/store';
 import { broadcast } from '@/modules/sse/broadcaster';
 import { RematchSchema } from '../../schemas';
 
@@ -34,12 +38,15 @@ export async function POST(
         ...r,
         phase: 'lobby',
         players,
-        questions: [],
         answers: {},
         currentQuestionIndex: 0,
         phaseEndsAt: null,
       };
     });
+
+    // Drop the prior game's question bank — a fresh set is fetched when
+    // the host starts the next game. Errors are non-fatal (TTL cleans up).
+    await deleteQuestions(roomId).catch(() => {});
 
     broadcast(roomId, { event: 'state_sync', data: toPublicState(updated) });
 

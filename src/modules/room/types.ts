@@ -1,5 +1,3 @@
-import { Question } from '@/modules/game/types';
-
 export type AnswerMode =
   | 'allow_changes_until_deadline'
   | 'lock_on_first_submit';
@@ -48,10 +46,18 @@ export type RoomState = {
   answerCount: number;
 };
 
-// PRIVATE STATE — persisted in Redis. `answerCount` is derived from `answers`
-// in `toPublicState` and therefore omitted here to avoid a duplicate source of truth.
+// PRIVATE STATE — persisted in Redis at `room:{id}`.
+//
+// `answerCount` is derived from `answers` in `toPublicState` and therefore
+// omitted here to avoid a duplicate source of truth.
+//
+// `questions` lives in a SEPARATE Redis key (`room:{id}:questions`) written
+// once at game-start by the engine. Keeping the ~20 KB question array out
+// of this blob keeps every hot-path write (`submitAnswer`, phase advances,
+// ready-toggles) small — GET/SET round trips on Upstash cost roughly
+// proportional to payload size, so the split is ~20 KB × every mutation
+// cheaper for a 10-question game.
 export type InternalRoomState = Omit<RoomState, 'answerCount'> & {
   version: number;
-  questions: Question[];
   answers: Record<string, string>;
 };

@@ -20,91 +20,11 @@ function mustRedisEval(): (
   ) => Promise<ScriptResult>;
 }
 
-export async function updateRoomIfVersion(
-  roomKey: string,
-  expectedVersion: number,
-  nextState: InternalRoomState,
-  ttlSeconds = ROOM_TTL_SECONDS
-): Promise<boolean> {
-  const evalRedis = mustRedisEval();
-  const payload = JSON.stringify(nextState);
-  const result = await evalRedis(
-    `
-local current = redis.call("GET", KEYS[1])
-if not current then
-  return -1
-end
-local decoded = cjson.decode(current)
-local version = tonumber(decoded.version or 0)
-if version ~= tonumber(ARGV[1]) then
-  return 0
-end
-redis.call("SET", KEYS[1], ARGV[2], "EX", tonumber(ARGV[3]))
-return 1
-`,
-    [roomKey],
-    [expectedVersion, payload, ttlSeconds]
-  );
-  return Number(result) === 1;
-}
-
-export type SubmitAnswerResult =
-  | { status: 'updated'; room: InternalRoomState }
-  | {
-      status:
-        | 'not_found'
-        | 'wrong_phase'
-        | 'phase_expired'
-        | 'not_member'
-        | 'already_answered'
-        | 'conflict';
-    };
-
-export async function submitAnswerAtomically(
-  roomRedisKey: string,
-  playerId: string,
-  optionId: string,
-  answeredAt: number
-): Promise<SubmitAnswerResult> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const room = await redis.get<InternalRoomState>(roomRedisKey);
-    if (!room) return { status: 'not_found' };
-    if (room.phase !== 'question') return { status: 'wrong_phase' };
-    if (!room.players[playerId]) return { status: 'not_member' };
-    if (room.phaseEndsAt !== null && Date.now() > room.phaseEndsAt) {
-      return { status: 'phase_expired' };
-    }
-
-    const lockOnFirstSubmit =
-      room.settings.answerMode === 'lock_on_first_submit';
-    if (lockOnFirstSubmit && room.answers[playerId] !== undefined) {
-      return { status: 'already_answered' };
-    }
-
-    const firstAnsweredAt = room.players[playerId].answeredAt ?? answeredAt;
-    const next: InternalRoomState = {
-      ...room,
-      version: (room.version ?? 0) + 1,
-      answers: { ...room.answers, [playerId]: optionId },
-      players: {
-        ...room.players,
-        [playerId]: {
-          ...room.players[playerId],
-          answeredAt: firstAnsweredAt,
-        },
-      },
-    };
-
-    const committed = await updateRoomIfVersion(
-      roomRedisKey,
-      room.version ?? 0,
-      next,
-      ROOM_TTL_SECONDS
-    );
-    if (committed) return { status: 'updated', room: next };
-  }
-  return { status: 'conflict' };
-}
+// NOTE: `updateRoomIfVersion` and `submitAnswerAtomically` were removed
+// together with the optimistic-CAS retry loop — mutations now serialize
+// through an in-process per-room mutex (`./mutex.ts`), so a plain GET/SET
+// pair via `updateRoom` replaces both. Revisit if we ever run multiple
+// writer processes against the same Redis.
 
 export async function createRoomWithCodeIfAbsent(
   roomRedisKey: string,
@@ -131,9 +51,25 @@ return 1
 
 export async function deleteRoomAndCode(
   roomRedisKey: string,
-  codeRedisKey: string
+  codeRedisKey: string,
+  roomQuestionsRedisKey?: string
 ): Promise<void> {
   const evalRedis = mustRedisEval();
+  // Optionally DEL the questions key in the same atomic call so we don't
+  // leak a 20 KB blob when the room is torn down mid-game.
+  if (roomQuestionsRedisKey) {
+    await evalRedis(
+      `
+redis.call("DEL", KEYS[1])
+redis.call("DEL", KEYS[2])
+redis.call("DEL", KEYS[3])
+return 1
+`,
+      [roomRedisKey, codeRedisKey, roomQuestionsRedisKey],
+      []
+    );
+    return;
+  }
   await evalRedis(
     `
 redis.call("DEL", KEYS[1])

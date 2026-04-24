@@ -204,7 +204,6 @@ function baseRoom(
     phaseEndsAt: null,
     createdAt: now(),
     version: 1,
-    questions: [],
     answers: {},
     ...overrides,
   };
@@ -839,18 +838,11 @@ describe('room store', () => {
   it('toPublicState omits private fields and derives answerCount', () => {
     const state: InternalRoomState = {
       ...baseRoom(),
-      questions: [
-        {
-          id: 'q1',
-          text: 'x',
-          options: [],
-          correctOptionId: 'opt-1',
-          category: 'general',
-        },
-      ],
       answers: { a: 'opt-a', b: 'opt-b' },
     };
     const pub = roomStore.toPublicState(state);
+    // `questions` lives in a separate Redis key now — it must never appear
+    // on the public payload regardless of where it's stored.
     expect((pub as Record<string, unknown>).questions).toBeUndefined();
     expect((pub as Record<string, unknown>).answers).toBeUndefined();
     expect(pub.answerCount).toBe(2);

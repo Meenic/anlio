@@ -1,12 +1,14 @@
 import { OFFLINE_PLAYER_GRACE_MS } from '@/modules/room/constants';
 import { countConnectedPlayers } from '@/modules/room/selectors';
 import {
+  deleteQuestions,
   deleteRoom,
   getRoom,
   toPublicState,
   updateRoom,
   codeKey,
   roomKey,
+  roomQuestionsKey,
 } from '@/modules/room/store';
 import { deleteRoomAndCode } from '@/modules/room/redis-scripts';
 import { broadcast } from './broadcaster';
@@ -108,26 +110,26 @@ async function removeIfStillOffline(
   }
 
   if (Object.keys(updated.players).length === 0) {
-    await deleteRoomAndCode(roomKey(roomId), codeKey(room.code)).catch(
-      async (err) => {
-        console.warn(
-          `[offline-removal] deleteRoomAndCode failed, falling back to individual deletes room=${roomId}`,
+    await deleteRoomAndCode(
+      roomKey(roomId),
+      codeKey(room.code),
+      roomQuestionsKey(roomId)
+    ).catch(async (err) => {
+      console.warn(
+        `[offline-removal] deleteRoomAndCode failed, falling back to individual deletes room=${roomId}`,
+        err
+      );
+      await deleteRoom(roomId).catch((err) => {
+        console.error(`[offline-removal] failed to delete room=${roomId}`, err);
+      });
+      await deleteRoomCode(room.code).catch((err) => {
+        console.error(
+          `[offline-removal] failed to delete room code=${room.code}`,
           err
         );
-        await deleteRoom(roomId).catch((err) => {
-          console.error(
-            `[offline-removal] failed to delete room=${roomId}`,
-            err
-          );
-        });
-        await deleteRoomCode(room.code).catch((err) => {
-          console.error(
-            `[offline-removal] failed to delete room code=${room.code}`,
-            err
-          );
-        });
-      }
-    );
+      });
+      await deleteQuestions(roomId).catch(() => {});
+    });
     return;
   }
 

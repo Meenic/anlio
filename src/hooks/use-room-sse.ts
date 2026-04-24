@@ -183,6 +183,13 @@ export function applyEvent(
   }
 }
 
+export type UseRoomSseOptions = {
+  /** Hydrated snapshot from the RSC / bootstrap action. When provided,
+   *  `state` is populated from the FIRST render and `loading` is false —
+   *  no skeleton flash while waiting for the initial SSE `state_sync`. */
+  initialState?: RoomState | null;
+};
+
 /**
  * Owns the SSE connection for a room and exposes the current `RoomState`.
  *
@@ -196,11 +203,13 @@ export function applyEvent(
  */
 export function useRoomSse(
   roomId: string,
-  selfId?: string | null
+  selfId?: string | null,
+  options?: UseRoomSseOptions
 ): UseRoomSseResult {
-  const [state, setState] = useState<RoomState | null>(null);
+  const initial = options?.initialState ?? null;
+  const [state, setState] = useState<RoomState | null>(initial);
   const [status, setStatus] = useState<RoomSseStatus>('connecting');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(initial === null);
   const [appError, setAppError] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
   const [currentQuestion, setCurrentQuestion] =
@@ -219,9 +228,9 @@ export function useRoomSse(
   const [trackedRoomId, setTrackedRoomId] = useState(roomId);
   if (trackedRoomId !== roomId) {
     setTrackedRoomId(roomId);
-    setState(null);
+    setState(initial);
     setStatus('connecting');
-    setLoading(true);
+    setLoading(initial === null);
     setAppError(null);
     setRemoved(false);
     setCurrentQuestion(null);

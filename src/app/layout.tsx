@@ -1,20 +1,19 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
-import { Bricolage_Grotesque, Geist, Geist_Mono } from 'next/font/google';
+import { Bricolage_Grotesque, Geist } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/components/layout/theme-provider';
 import { cn } from '@/lib/utils';
 
+// Body / UI — loaded with swap so layout doesn't block on the font.
 const geistSans = Geist({
   variable: '--font-geist-sans',
   subsets: ['latin'],
 });
 
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
-
+// Headings — same reasoning. Monospace slot is served by the system stack
+// (see `--font-mono` in globals.css) — the only mono usage is 6-char room
+// codes, which does not justify a Google Fonts round trip.
 const bricolageGrotesque = Bricolage_Grotesque({
   variable: '--font-heading',
   subsets: ['latin'],
@@ -38,7 +37,6 @@ export default function RootLayout({
         'h-full',
         'antialiased',
         geistSans.variable,
-        geistMono.variable,
         bricolageGrotesque.variable
       )}
     >

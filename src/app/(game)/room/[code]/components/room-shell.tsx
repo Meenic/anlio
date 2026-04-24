@@ -1,221 +1,237 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRoomSse } from '@/hooks/use-room-sse';
-import { authClient } from '@/lib/auth-client';
-import { parseApiError } from '@/lib/api/client';
-import { getOrCreateSession } from '@/lib/ensure-session';
-import type { EnsureSessionResult } from '@/lib/ensure-session';
 import { RoomSkeleton } from './layout/room-skeleton';
 import { NameDialog } from '@/components/marketing/name-dialog';
-import { useNameDialog } from '@/hooks/use-name-dialog';
 import { RoomLayout } from './layout/room-layout';
 import { RoomPhaseRouter } from './room-phase-router';
 import { PlayerRail } from './layout/player-rail';
 import { WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  bootstrapRoomAction,
+  renameSelfAction,
+} from '@/modules/room/server-actions';
+import type { RoomState } from '@/modules/room/types';
 
 type RoomShellProps = {
   roomId: string;
   roomCode: string;
+  /** RSC-prehydrated snapshot when the user is already a room member.
+   *  When present, first paint is the live room and `RoomLive` mounts
+   *  directly with no bootstrap roundtrip. */
+  initialState: RoomState | null;
+  /** Session user id when a session cookie was present during the RSC
+   *  render. `null` means the browser has no session — we must call the
+   *  bootstrap server action to create one + join. */
+  selfId: string | null;
 };
 
-export function RoomShell({ roomId, roomCode }: RoomShellProps) {
-  const { open, promptName, handleConfirm, handleOpenChange } = useNameDialog();
-  const membership = useJoinRoom(roomCode, promptName);
-  const router = useRouter();
-
-  if (membership.kind === 'joining') {
+/**
+ * Room shell decision tree:
+ *
+ *   ┌ initialState + selfId  → render RoomLive immediately (fast path)
+ *   ├ selfId only            → join via server action, then RoomLive
+ *   └ neither                → signInAnonymous + join via server action
+ *
+ * In all three branches we avoid the previous 2-3 sequential client fetches
+ * (getSession → signIn → updateUser → /api/room/join → getSession).
+ */
+export function RoomShell({
+  roomId,
+  roomCode,
+  initialState,
+  selfId,
+}: RoomShellProps) {
+  // Fast path: RSC already proved membership and snapshotted state.
+  if (initialState && selfId) {
     return (
-      <>
-        <RoomSkeleton />
-        <NameDialog
-          open={open}
-          onConfirm={handleConfirm}
-          onOpenChange={handleOpenChange}
-        />
-      </>
+      <RoomLive
+        roomId={roomId}
+        selfId={selfId}
+        initialState={initialState}
+        // The RSC path never creates a new session, so no inline dialog.
+        showRenameDialog={false}
+      />
     );
   }
 
-  if (membership.kind === 'error') {
-    return (
-      <>
-        <div className="flex min-h-[60vh] items-center justify-center p-6">
-          <Card size="sm" className="w-full max-w-sm">
-            <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
-              <WifiOff className="size-8 text-destructive" />
-              <div className="flex flex-col items-center gap-1 text-center">
-                <p className="text-sm font-medium">
-                  Couldn&apos;t join this room
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {membership.message}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button type="button" onClick={membership.retry}>
-                  Try again
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => router.push('/')}
-                >
-                  Back home
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-        <NameDialog
-          open={open}
-          onConfirm={handleConfirm}
-          onOpenChange={handleOpenChange}
-        />
-      </>
-    );
-  }
-
-  return <RoomLive roomId={roomId} selfId={membership.selfId} />;
+  return <RoomBootstrap roomId={roomId} roomCode={roomCode} />;
 }
 
-type JoinState =
-  | { kind: 'joining' }
-  | { kind: 'error'; message: string; retry: () => void }
-  | { kind: 'joined'; selfId: string };
+type BootstrapState =
+  | { kind: 'pending' }
+  | {
+      kind: 'ready';
+      selfId: string;
+      initialState: RoomState;
+      isNewSession: boolean;
+    }
+  | { kind: 'error'; message: string; retry: () => void };
 
-function useJoinRoom(
-  roomCode: string,
-  promptName: () => Promise<string | null>
-): JoinState {
-  const [state, setState] = useState<JoinState>({ kind: 'joining' });
+function RoomBootstrap({
+  roomId,
+  roomCode,
+}: {
+  roomId: string;
+  roomCode: string;
+}) {
+  const [state, setState] = useState<BootstrapState>({ kind: 'pending' });
   const [attempt, setAttempt] = useState(0);
-  const hasJoined = useRef(false);
+  const inflight = useRef(false);
+  const router = useRouter();
 
   const retry = useCallback(() => {
-    hasJoined.current = false;
+    inflight.current = false;
+    setState({ kind: 'pending' });
     setAttempt((n) => n + 1);
-    setState({ kind: 'joining' });
   }, []);
 
   useEffect(() => {
-    if (hasJoined.current) return;
-
+    if (inflight.current) return;
+    inflight.current = true;
     let cancelled = false;
-    const abort = new AbortController();
 
-    async function bootstrap() {
-      hasJoined.current = true;
-      setState({ kind: 'joining' });
-
-      try {
-        const result: EnsureSessionResult = await getOrCreateSession(
-          promptName,
-          abort.signal
-        );
-        if (cancelled) return;
-        if (result === 'aborted') {
-          hasJoined.current = false;
-          setState({
-            kind: 'error',
-            message: 'Display name is required to join this room.',
-            retry,
-          });
-          return;
-        }
-
-        const res = await fetch('/api/room/join', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: roomCode }),
-        });
-        if (!res.ok) {
-          throw new Error(
-            await parseApiError(res, `Failed to join room (${res.status})`)
-          );
-        }
-
-        if (cancelled) return;
-
-        // Fetch fresh session to get user ID — useSession() hasn't updated yet
-        // after anonymous sign-in.
-        const { data } = await authClient.getSession();
-        const userId = data?.user?.id;
-        if (userId) {
-          setState({ kind: 'joined', selfId: userId });
-        } else {
-          hasJoined.current = false;
-          setState({
-            kind: 'error',
-            message: 'Session lost after joining. Please refresh.',
-            retry,
-          });
-        }
-      } catch (e) {
-        if (cancelled) return;
-        hasJoined.current = false;
-        setState({
-          kind: 'error',
-          message: e instanceof Error ? e.message : 'Something went wrong.',
-          retry,
-        });
+    (async () => {
+      const result = await bootstrapRoomAction(roomCode);
+      if (cancelled) return;
+      if (!result.ok) {
+        setState({ kind: 'error', message: result.message, retry });
+        inflight.current = false;
+        return;
       }
-    }
+      setState({
+        kind: 'ready',
+        selfId: result.selfId,
+        initialState: result.initialState,
+        isNewSession: result.isNewSession,
+      });
+    })();
 
-    void bootstrap();
     return () => {
       cancelled = true;
-      abort.abort();
     };
-  }, [attempt, roomCode, promptName, retry]);
+  }, [roomCode, attempt, retry]);
 
-  return state;
+  if (state.kind === 'pending') {
+    return <RoomSkeleton />;
+  }
+
+  if (state.kind === 'error') {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <Card size="sm" className="w-full max-w-sm">
+          <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+            <WifiOff className="size-8 text-destructive" />
+            <div className="flex flex-col items-center gap-1 text-center">
+              <p className="text-sm font-medium">
+                Couldn&apos;t join this room
+              </p>
+              <p className="text-xs text-muted-foreground">{state.message}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button type="button" onClick={state.retry}>
+                Try again
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => router.push('/')}
+              >
+                Back home
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <RoomLive
+      roomId={roomId}
+      selfId={state.selfId}
+      initialState={state.initialState}
+      showRenameDialog={state.isNewSession}
+    />
+  );
 }
 
-function RoomLive({ roomId, selfId }: { roomId: string; selfId: string }) {
-  const sse = useRoomSse(roomId, selfId);
+function RoomLive({
+  roomId,
+  selfId,
+  initialState,
+  showRenameDialog,
+}: {
+  roomId: string;
+  selfId: string;
+  initialState: RoomState;
+  showRenameDialog: boolean;
+}) {
+  const sse = useRoomSse(roomId, selfId, { initialState });
   const router = useRouter();
+  const [dialogOpen, setDialogOpen] = useState(showRenameDialog);
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     if (sse.removed) router.push('/?kicked=true');
   }, [sse.removed, router]);
 
-  if (sse.loading || !sse.state) {
-    return <RoomSkeleton />;
-  }
+  const handleRenameConfirm = useCallback(
+    (name: string) => {
+      setDialogOpen(false);
+      startTransition(async () => {
+        await renameSelfAction(roomId, name);
+      });
+    },
+    [roomId]
+  );
+
+  // `sse.state` cannot actually be null here because we seeded it — but
+  // keep the fallback skeleton to satisfy the type narrowing and guard
+  // against future refactors that drop `initialState`.
+  const room = sse.state ?? initialState;
 
   return (
-    <RoomLayout
-      room={sse.state}
-      selfId={selfId}
-      sseStatus={sse.status}
-      sidebar={
-        <PlayerRail
-          room={sse.state}
-          selfId={selfId}
-          className="hidden lg:flex"
-        />
-      }
-    >
-      {sse.error && (
-        <div
-          role="alert"
-          className="sticky top-0 z-10 flex items-center justify-center gap-2 bg-destructive/10 px-4 py-2 text-xs font-medium text-destructive"
-        >
-          {sse.error}
-        </div>
-      )}
-      <RoomPhaseRouter
-        room={sse.state}
+    <>
+      <RoomLayout
+        room={room}
         selfId={selfId}
-        currentQuestion={sse.currentQuestion}
-        reveal={sse.reveal}
-        leaderboard={sse.leaderboard}
-        gameEnded={sse.gameEnded}
+        sseStatus={sse.status}
+        sidebar={
+          <PlayerRail room={room} selfId={selfId} className="hidden lg:flex" />
+        }
+      >
+        {sse.error && (
+          <div
+            role="alert"
+            className="sticky top-0 z-10 flex items-center justify-center gap-2 bg-destructive/10 px-4 py-2 text-xs font-medium text-destructive"
+          >
+            {sse.error}
+          </div>
+        )}
+        <RoomPhaseRouter
+          room={room}
+          selfId={selfId}
+          currentQuestion={sse.currentQuestion}
+          reveal={sse.reveal}
+          leaderboard={sse.leaderboard}
+          gameEnded={sse.gameEnded}
+        />
+      </RoomLayout>
+      {/* Inline name dialog — shown only for fresh anonymous sessions so the
+          user can rename their server-generated `Guest-XXXXXX` placeholder
+          without blocking the room from rendering. */}
+      <NameDialog
+        open={dialogOpen}
+        onConfirm={handleRenameConfirm}
+        onOpenChange={setDialogOpen}
+        title="Pick a display name"
+        confirmLabel="Save"
       />
-    </RoomLayout>
+    </>
   );
 }

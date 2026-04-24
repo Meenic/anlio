@@ -1,4 +1,9 @@
-import { updateRoom } from '../room/store';
+import {
+  deleteQuestions,
+  getQuestions,
+  setQuestions,
+  updateRoom,
+} from '../room/store';
 import { broadcast } from '../sse/broadcaster';
 import { calculateTimeBonus } from './scoring';
 import { fetchQuestions } from './questions';
@@ -50,18 +55,27 @@ function topScorerIds(players: Player[]): string[] {
 export async function startGame(roomId: string, settings: RoomSettings) {
   const questions = await fetchQuestions(settings);
 
+  // Persist questions to their dedicated key BEFORE the room mutates into
+  // `starting` — guarantees every downstream phase handler has them
+  // available even if the process restarts right after this point.
+  await setQuestions(roomId, questions);
+
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'lobby') return r;
     return {
       ...r,
       phase: 'starting',
-      questions,
       currentQuestionIndex: 0,
       answers: {},
       phaseEndsAt: Date.now() + STARTING_DELAY_MS,
     };
   });
-  if (updated.phase !== 'starting') return;
+  if (updated.phase !== 'starting') {
+    // Transition rejected (e.g. another concurrent call beat us). Clean up
+    // the orphaned questions blob so we don't leak Upstash bytes.
+    await deleteQuestions(roomId).catch(() => {});
+    return;
+  }
 
   broadcast(roomId, {
     event: 'game_starting',
@@ -72,12 +86,20 @@ export async function startGame(roomId: string, settings: RoomSettings) {
 }
 
 export async function pushQuestion(roomId: string) {
+  // Fetch questions once from their dedicated key. Closing over them in the
+  // `updateRoom` mutator keeps the room blob small on every phase write.
+  const questions = await getQuestions(roomId);
+  if (!questions || questions.length === 0) {
+    console.warn(`[engine] pushQuestion missing questions room=${roomId}`);
+    return;
+  }
+
   let expectedIndex = -1;
   let timeLimit = 0;
 
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'starting' && r.phase !== 'leaderboard') return r;
-    const nextQuestion = r.questions[r.currentQuestionIndex];
+    const nextQuestion = questions[r.currentQuestionIndex];
     if (!nextQuestion) return r;
 
     expectedIndex = r.currentQuestionIndex;
@@ -101,7 +123,7 @@ export async function pushQuestion(roomId: string) {
     return;
   }
 
-  const question = updated.questions[updated.currentQuestionIndex];
+  const question = questions[updated.currentQuestionIndex];
   // Strip the correct answer to prevent network-tab cheating
   const { correctOptionId: _c, category: _cat, ...safeQuestion } = question;
 
@@ -109,7 +131,7 @@ export async function pushQuestion(roomId: string) {
     event: 'question',
     data: {
       index: updated.currentQuestionIndex,
-      total: updated.questions.length,
+      total: questions.length,
       question: safeQuestion,
       phaseEndsAt: updated.phaseEndsAt!,
     },
@@ -119,11 +141,17 @@ export async function pushQuestion(roomId: string) {
 }
 
 export async function revealQuestion(roomId: string) {
+  const questions = await getQuestions(roomId);
+  if (!questions || questions.length === 0) {
+    console.warn(`[engine] revealQuestion missing questions room=${roomId}`);
+    return;
+  }
+
   let scoreDeltas: Record<string, number> = {};
 
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'question') return r;
-    const question = r.questions[r.currentQuestionIndex];
+    const question = questions[r.currentQuestionIndex];
     if (!question || r.phaseEndsAt === null) return r;
 
     const updatedPlayers = { ...r.players };
@@ -162,13 +190,13 @@ export async function revealQuestion(roomId: string) {
 
   if (updated.phase !== 'reveal') return;
 
-  const question = updated.questions[updated.currentQuestionIndex];
+  const question = questions[updated.currentQuestionIndex];
 
   broadcast(roomId, {
     event: 'reveal',
     data: {
       questionIndex: updated.currentQuestionIndex,
-      totalQuestions: updated.questions.length,
+      totalQuestions: questions.length,
       question: {
         id: question.id,
         text: question.text,
@@ -187,11 +215,18 @@ export async function revealQuestion(roomId: string) {
 }
 
 export async function showLeaderboard(roomId: string) {
+  const questions = await getQuestions(roomId);
+  if (!questions || questions.length === 0) {
+    console.warn(`[engine] showLeaderboard missing questions room=${roomId}`);
+    return;
+  }
+
+  const totalQuestions = questions.length;
   let isLastQuestion = false;
 
   const updated = await updateRoom(roomId, (r) => {
     if (r.phase !== 'reveal') return r;
-    isLastQuestion = r.currentQuestionIndex >= r.questions.length - 1;
+    isLastQuestion = r.currentQuestionIndex >= totalQuestions - 1;
     if (isLastQuestion) return r;
 
     return {
@@ -217,7 +252,7 @@ export async function showLeaderboard(roomId: string) {
       players: ranked,
       nextIn: LEADERBOARD_DELAY_MS / 1000,
       questionIndex: updated.currentQuestionIndex - 1,
-      totalQuestions: updated.questions.length,
+      totalQuestions,
       topScore: topScore(ranked),
     },
   });
@@ -254,8 +289,8 @@ export async function endGame(roomId: string) {
     },
   });
 
-  // Persist results BEFORE deleting the room so a DB failure leaves
-  // recoverable state in Redis rather than silently destroying it.
+  // Persist results BEFORE cleaning up volatile state so a DB failure
+  // leaves recoverable state in Redis rather than silently destroying it.
   try {
     await db.insert(gameResults).values({
       id: nanoid(),
@@ -272,6 +307,12 @@ export async function endGame(roomId: string) {
     );
     return; // Do NOT delete the room — leave it for retry / investigation.
   }
+
+  // The questions bank is no longer needed once the game is over (a rematch
+  // will re-fetch a fresh set). Drop it to free the ~20 KB Upstash slot.
+  await deleteQuestions(roomId).catch((err) => {
+    console.warn(`[engine] deleteQuestions failed room=${roomId}`, err);
+  });
 
   // Keep the room alive in Redis so the host can start a rematch. The
   // existing TTL will garbage-collect it once it's truly abandoned; the

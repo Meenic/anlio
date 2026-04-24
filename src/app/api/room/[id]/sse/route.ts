@@ -133,8 +133,21 @@ export async function GET(
         }
       };
 
-      // Mark player as connected (best-effort — room may have been deleted
-      // between the membership check above and this write).
+      // PAINT-FIRST ORDER: we already fetched `initialRoom` during the
+      // pre-flight membership check. Ship the `state_sync` to the client
+      // immediately — one TCP packet, no Redis write on the critical path —
+      // so the browser can render the live room while we, in parallel, mark
+      // the player `connected=true` and broadcast `player_joined` to peers.
+      //
+      // Flipping this order cuts ~1 Redis RTT off first-paint latency for
+      // the joining client. Other clients see a marginally later
+      // `player_joined` (still within the same tick for hot Redis), which
+      // is a non-issue since presence is best-effort anyway.
+      sendToPlayer(roomId, playerId, {
+        event: 'state_sync',
+        data: toPublicState(initialRoom),
+      });
+
       const connectedRoom = await tryUpdateRoom(roomId, (room) => {
         const player = room.players[playerId];
         if (!player) return room;
@@ -159,25 +172,22 @@ export async function GET(
         return;
       }
 
-      if (connectedRoom) {
-        // Immediately sync public state so the client UI renders instantly.
-        // `toPublicState` strips questions + individual answers but exposes
-        // `answerCount` so a reconnecting client can render the answered
-        // indicator correctly.
-        sendToPlayer(roomId, playerId, {
-          event: 'state_sync',
-          data: toPublicState(connectedRoom),
-        });
+      // Re-sync with the authoritative post-write snapshot so any state that
+      // changed between the pre-flight read and the connected-flag write is
+      // reflected on the client. Cheap: same controller, same encoder.
+      sendToPlayer(roomId, playerId, {
+        event: 'state_sync',
+        data: toPublicState(connectedRoom),
+      });
 
-        // Symmetric to the `player_left` broadcast in `cleanup`: tell the
-        // rest of the room their presence indicators are stale so they
-        // don't have to wait for the next unrelated state update.
-        const count = countConnectedPlayers(connectedRoom.players);
-        broadcast(roomId, {
-          event: 'player_joined',
-          data: { player: connectedRoom.players[playerId], count },
-        });
-      }
+      // Symmetric to the `player_left` broadcast in `cleanup`: tell the
+      // rest of the room their presence indicators are stale so they
+      // don't have to wait for the next unrelated state update.
+      const count = countConnectedPlayers(connectedRoom.players);
+      broadcast(roomId, {
+        event: 'player_joined',
+        data: { player: connectedRoom.players[playerId], count },
+      });
 
       // Heartbeat: detect dead sockets that never trigger `abort`
       // (phone locks, laptop sleep, NAT drops, etc.).
