@@ -48,7 +48,7 @@ export async function bootstrapRoomAction(
     const preSession = await auth.api.getSession({ headers: hdrs });
     const isNewSession = !preSession?.user?.id;
 
-    const user = await ensureSessionUser();
+    const user = await ensureSessionUser(preSession);
     const { roomId } = await joinRoomByCode(code, user);
 
     const room = await getRoom(roomId);
@@ -119,26 +119,32 @@ export async function renameSelfAction(
   }
 
   // Patch the in-room player snapshot + re-broadcast so other clients see it.
-  const updated = await updateRoom(roomId, (r) => {
-    const player = r.players[userId];
-    if (!player || player.name === trimmed) return r;
-    return {
-      ...r,
-      players: {
-        ...r.players,
-        [userId]: { ...player, name: trimmed },
-      },
-    };
-  }).catch(() => null);
-
-  if (updated?.players[userId]) {
-    broadcast(roomId, {
-      event: 'player_joined',
-      data: {
-        player: updated.players[userId],
-        count: Object.values(updated.players).filter((p) => p.connected).length,
-      },
+  try {
+    const updated = await updateRoom(roomId, (r) => {
+      const player = r.players[userId];
+      if (!player || player.name === trimmed) return r;
+      return {
+        ...r,
+        players: {
+          ...r.players,
+          [userId]: { ...player, name: trimmed },
+        },
+      };
     });
+
+    if (updated.players[userId]) {
+      broadcast(roomId, {
+        event: 'player_joined',
+        data: {
+          player: updated.players[userId],
+          count: Object.values(updated.players).filter((p) => p.connected)
+            .length,
+        },
+      });
+    }
+  } catch (error) {
+    console.error('[renameSelfAction] updateRoom failed', error);
+    return { ok: false, message: 'Failed to update room state.' };
   }
 
   return { ok: true };

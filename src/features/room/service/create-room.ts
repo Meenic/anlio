@@ -39,7 +39,7 @@ export async function createRoom(
       score: 0,
       wins: 0,
       ready: true,
-      connected: false,
+      connected: true,
     };
     const state: InternalRoomState = {
       id,

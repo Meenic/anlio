@@ -22,7 +22,7 @@ export async function joinRoomByCode(
     score: 0,
     wins: 0,
     ready: false,
-    connected: false,
+    connected: true,
   };
 
   await updateRoom(roomId, (r) => {

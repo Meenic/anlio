@@ -16,11 +16,25 @@ import { auth } from './auth';
  * wrongly conclude "Session lost after sign-in". Use the `user` payload
  * the sign-in endpoint already returned.
  */
-export async function ensureSessionUser(): Promise<{
+export type SessionUser = {
   id: string;
   name: string;
   image?: string | null;
-}> {
+};
+
+export async function ensureSessionUser(
+  existingSession?: {
+    user: { id: string; name?: string | null; image?: string | null };
+  } | null
+): Promise<SessionUser> {
+  if (existingSession?.user?.id) {
+    return {
+      id: existingSession.user.id,
+      name: existingSession.user.name ?? 'Player',
+      image: existingSession.user.image,
+    };
+  }
+
   const hdrs = await headers();
   const session = await auth.api.getSession({ headers: hdrs });
   if (session?.user?.id) {

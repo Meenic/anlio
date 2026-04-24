@@ -1,12 +1,11 @@
 import { notFound, redirect } from 'next/navigation';
-import { headers } from 'next/headers';
 import { ROOM_CODE_LENGTH } from '@/features/room/constants';
 import {
   getRoom,
   getRoomIdByCodeCached,
   toPublicState,
 } from '@/features/room/store';
-import { auth } from '@/features/session/auth';
+import { currentSessionUser } from '@/features/session/ensure-user.server';
 import type { RoomState } from '@/features/room/types';
 import { RoomShell } from '@/components/room/room-shell';
 
@@ -29,10 +28,9 @@ export default async function RoomPage({
   // The RSC render CANNOT set cookies (Next constraint), so we do NOT
   // attempt to auto-create an anonymous session here — if no session is
   // present, the client invokes `bootstrapRoomAction` on mount instead.
-  const hdrs = await headers();
   const [roomId, session] = await Promise.all([
     getRoomIdByCodeCached(code),
-    auth.api.getSession({ headers: hdrs }),
+    currentSessionUser(),
   ]);
 
   if (!roomId) {
@@ -45,17 +43,17 @@ export default async function RoomPage({
   let initialState: RoomState | null = null;
   let selfId: string | null = null;
 
-  if (session?.user?.id) {
+  if (session?.id) {
     const room = await getRoom(roomId);
-    if (room?.players[session.user.id]) {
+    if (room?.players[session.id]) {
       initialState = toPublicState(room);
-      selfId = session.user.id;
+      selfId = session.id;
     } else if (room) {
       // Session exists but not a member yet. We deliberately do NOT write
       // to Redis from the RSC path — bootstrap runs on the client via a
       // Server Action, which keeps all room writes on one code path and
       // avoids double-joins under React's strict render.
-      selfId = session.user.id;
+      selfId = session.id;
     }
   }
 
