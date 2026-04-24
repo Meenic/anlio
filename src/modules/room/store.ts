@@ -1,6 +1,7 @@
 import { redis } from '@/lib/redis';
 import { ROOM_TTL_SECONDS } from './constants';
 import type { InternalRoomState, RoomState } from './types';
+import { cacheLife, cacheTag } from 'next/cache';
 import { updateRoomIfVersion } from './redis-scripts';
 
 export const roomKey = (id: string) => `room:${id}`;
@@ -106,6 +107,15 @@ export async function setRoomCode(code: string, roomId: string): Promise<void> {
 }
 
 export async function getRoomIdByCode(code: string): Promise<string | null> {
+  return redis.get<string>(codeKey(code));
+}
+
+export async function getRoomIdByCodeCached(
+  code: string
+): Promise<string | null> {
+  'use cache';
+  cacheLife('minutes');
+  cacheTag(`room-code:${code}`);
   return redis.get<string>(codeKey(code));
 }
 

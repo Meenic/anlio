@@ -1,4 +1,4 @@
-import { updateRoom, deleteRoom } from '../room/store';
+import { updateRoom } from '../room/store';
 import { broadcast } from '../sse/broadcaster';
 import { calculateTimeBonus } from './scoring';
 import { fetchQuestions } from './questions';
@@ -273,5 +273,7 @@ export async function endGame(roomId: string) {
     return; // Do NOT delete the room — leave it for retry / investigation.
   }
 
-  await deleteRoom(roomId);
+  // Keep the room alive in Redis so the host can start a rematch. The
+  // existing TTL will garbage-collect it once it's truly abandoned; the
+  // `leaveRoom` + offline-removal flows also delete it when empty.
 }

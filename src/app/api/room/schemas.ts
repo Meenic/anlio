@@ -53,6 +53,8 @@ export const UpdateSettingsSchema = RoomSettingsSchema.partial();
 
 export const StartGameSchema = z.object({}).strict();
 
+export const RematchSchema = z.object({}).strict();
+
 export const AnswerSchema = z.object({
   optionId: z.string().min(1).max(64),
 });

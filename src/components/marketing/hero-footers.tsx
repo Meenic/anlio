@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,45 +9,7 @@ import { getOrCreateSession } from '@/lib/ensure-session';
 import { parseApiError } from '@/lib/api/client';
 import { ROOM_CODE_LENGTH } from '@/modules/room/constants';
 import { NameDialog } from './name-dialog';
-
-/**
- * Reset transient component state when the page is restored from the
- * back-forward cache (clicking Back after navigating away and returning).
- *
- * React state is preserved through bfcache, so a `pending`/`error` set
- * before navigation would otherwise linger and leave the button stuck in
- * a disabled “Creating…” / “Joining…” state. The `pageshow` event fires
- * on both initial load and bfcache restore; `event.persisted === true`
- * distinguishes the restore case.
- *
- * `useState` setters are identity-stable, so the caller typically wraps
- * the reset in a `useCallback(..., [])` to keep the listener stable.
- */
-function useBfcacheReset(reset: () => void) {
-  useEffect(() => {
-    function onPageShow(e: PageTransitionEvent) {
-      if (e.persisted) reset();
-    }
-    window.addEventListener('pageshow', onPageShow);
-    return () => window.removeEventListener('pageshow', onPageShow);
-  }, [reset]);
-}
-
-/**
- * Shared hook: manages the `<NameDialog>` open state and exposes a
- * `promptName()` returning a promise that resolves with the confirmed name
- * or `null` if the dialog is dismissed. This is the closure passed to
- * `getOrCreateSession` from each click handler.
- *
- * A single dialog instance is rendered alongside both the Create and Join
- * entry points. One dialog is enough because only one action can be pending
- * at a time (user has to dismiss or confirm before trying the other).
- */
 import { useNameDialog } from '@/hooks/use-name-dialog';
-
-// ---------------------------------------------------------------------------
-// Create Room
-// ---------------------------------------------------------------------------
 
 export function CreateRoomButton() {
   const router = useRouter();
@@ -55,22 +17,15 @@ export function CreateRoomButton() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useBfcacheReset(
-    useCallback(() => {
-      setPending(false);
-      setError(null);
-    }, [])
-  );
-
   async function handleClick() {
     if (pending) return;
+    setPending(true);
     setError(null);
 
-    const result = await getOrCreateSession(promptName);
-    if (result === 'aborted') return;
-
-    setPending(true);
     try {
+      const result = await getOrCreateSession(promptName);
+      if (result === 'aborted') return;
+
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -85,6 +40,7 @@ export function CreateRoomButton() {
       router.push(`/room/${data.code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
       setPending(false);
     }
   }
@@ -114,10 +70,6 @@ export function CreateRoomButton() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Join Room
-// ---------------------------------------------------------------------------
-
 export function JoinRoomForm() {
   const router = useRouter();
   const { open, promptName, handleConfirm, handleOpenChange } = useNameDialog();
@@ -125,17 +77,9 @@ export function JoinRoomForm() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useBfcacheReset(
-    useCallback(() => {
-      setPending(false);
-      setError(null);
-    }, [])
-  );
-
   async function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     if (pending) return;
-    setError(null);
 
     const trimmed = code.trim().toUpperCase();
     if (trimmed.length !== ROOM_CODE_LENGTH) {
@@ -143,11 +87,13 @@ export function JoinRoomForm() {
       return;
     }
 
-    const result = await getOrCreateSession(promptName);
-    if (result === 'aborted') return;
-
     setPending(true);
+    setError(null);
+
     try {
+      const result = await getOrCreateSession(promptName);
+      if (result === 'aborted') return;
+
       const res = await fetch('/api/room/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -162,6 +108,7 @@ export function JoinRoomForm() {
       router.push(`/room/${data.code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
       setPending(false);
     }
   }
@@ -203,10 +150,6 @@ export function JoinRoomForm() {
     </>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Unchanged — purely cosmetic, no auth flow.
-// ---------------------------------------------------------------------------
 
 export function LeaderboardStats() {
   return (
