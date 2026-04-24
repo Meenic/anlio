@@ -3,6 +3,12 @@
 import { useEffect, useState } from 'react';
 import type { SSEEvent } from '@/modules/sse/types';
 import type { RoomState } from '@/modules/room/types';
+import type {
+  GameEndedPayload,
+  LeaderboardPayload,
+  QuestionPayload,
+  RevealPayload,
+} from '@/modules/game/types';
 
 /**
  * Connection status for the underlying `EventSource`.
@@ -33,6 +39,15 @@ export type UseRoomSseResult = {
   /** True when the server sent a terminal error (e.g. `not_a_member`) and the
    *  EventSource has been permanently closed. The UI should redirect. */
   removed: boolean;
+  /** Current question payload during the `question` phase. `null` otherwise.
+   *  Transient — not reconstructible from `state` alone. */
+  currentQuestion: QuestionPayload | null;
+  /** Reveal payload during the `reveal` phase. `null` otherwise. */
+  reveal: RevealPayload | null;
+  /** Leaderboard payload during the `leaderboard` phase. `null` otherwise. */
+  leaderboard: LeaderboardPayload | null;
+  /** Final results during the `ended` phase. `null` otherwise. */
+  gameEnded: GameEndedPayload | null;
 };
 
 /**
@@ -162,8 +177,7 @@ export function applyEvent(
     default: {
       // Exhaustiveness check — if a new event is added to SSEEvent and not
       // handled above, TypeScript will fail here at compile time.
-      const _never: never = event;
-      void _never;
+      event satisfies never;
       return prev;
     }
   }
@@ -189,6 +203,13 @@ export function useRoomSse(
   const [loading, setLoading] = useState(true);
   const [appError, setAppError] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
+  const [currentQuestion, setCurrentQuestion] =
+    useState<QuestionPayload | null>(null);
+  const [reveal, setReveal] = useState<RevealPayload | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardPayload | null>(
+    null
+  );
+  const [gameEnded, setGameEnded] = useState<GameEndedPayload | null>(null);
 
   // Reset state when `roomId` changes — canonical "reset during render" pattern
   // (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
@@ -203,6 +224,10 @@ export function useRoomSse(
     setLoading(true);
     setAppError(null);
     setRemoved(false);
+    setCurrentQuestion(null);
+    setReveal(null);
+    setLeaderboard(null);
+    setGameEnded(null);
   }
 
   useEffect(() => {
@@ -268,6 +293,36 @@ export function useRoomSse(
         setState((prev) => applyEvent(prev, event));
         if (event.event === 'state_sync') {
           setLoading(false);
+          // On a cold state_sync, clear any stale transient payloads if the
+          // room is no longer in that phase. (Re-syncs mid-game may land
+          // while e.g. the `question` phase is active — in that case the
+          // server will immediately follow with the `question` event.)
+          if (event.data.phase === 'lobby' || event.data.phase === 'starting') {
+            setCurrentQuestion(null);
+            setReveal(null);
+            setLeaderboard(null);
+            setGameEnded(null);
+          }
+        } else if (event.event === 'game_starting') {
+          setCurrentQuestion(null);
+          setReveal(null);
+          setLeaderboard(null);
+          setGameEnded(null);
+        } else if (event.event === 'question') {
+          setCurrentQuestion(event.data);
+          setReveal(null);
+          setLeaderboard(null);
+        } else if (event.event === 'reveal') {
+          setReveal(event.data);
+          setCurrentQuestion(null);
+        } else if (event.event === 'leaderboard') {
+          setLeaderboard(event.data);
+          setReveal(null);
+        } else if (event.event === 'game_ended') {
+          setGameEnded(event.data);
+          setLeaderboard(null);
+          setReveal(null);
+          setCurrentQuestion(null);
         }
       };
     }
@@ -306,5 +361,15 @@ export function useRoomSse(
     };
   }, [roomId, selfId]);
 
-  return { state, status, loading, error: appError, removed };
+  return {
+    state,
+    status,
+    loading,
+    error: appError,
+    removed,
+    currentQuestion,
+    reveal,
+    leaderboard,
+    gameEnded,
+  };
 }

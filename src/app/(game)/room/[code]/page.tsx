@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import { ROOM_CODE_LENGTH } from '@/modules/room/constants';
-import { getRoomIdByCode } from '@/modules/room/store';
-import { RoomClient } from './room-client';
+import { getRoomIdByCodeCached } from '@/modules/room/store';
+import { RoomShell } from './components/room-shell';
 
 export default async function RoomPage({
   params,
@@ -19,10 +19,10 @@ export default async function RoomPage({
     redirect(`/room/${code}`);
   }
 
-  const roomId = await getRoomIdByCode(code);
+  const roomId = await getRoomIdByCodeCached(code);
   if (!roomId) {
     notFound();
   }
 
-  return <RoomClient roomId={roomId} roomCode={code} />;
+  return <RoomShell roomId={roomId} roomCode={code} />;
 }
