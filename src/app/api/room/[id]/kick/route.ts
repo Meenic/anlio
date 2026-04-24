@@ -1,10 +1,10 @@
-import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { withApiErrors } from '@/lib/api/with-api-errors';
-import { updateRoom } from '@/modules/room/store';
-import { broadcast } from '@/modules/sse/broadcaster';
-import { cancelOfflineRemovalTimer } from '@/modules/sse/offline-removal';
-import { registry, unregisterClient } from '@/modules/sse/registry';
-import { KickSchema } from '../../schemas';
+import { jsonError, requireAuth, validateBody } from '@/lib/http';
+import { withApiErrors } from '@/lib/http';
+import { updateRoom } from '@/features/room/store';
+import { broadcast } from '@/features/realtime/broadcaster';
+import { cancelOfflineRemovalTimer } from '@/features/realtime/offline-removal';
+import { registry, unregisterClient } from '@/features/realtime/registry';
+import { KickSchema } from '@/features/room/schemas';
 
 export async function POST(
   request: Request,

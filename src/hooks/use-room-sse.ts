@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { SSEEvent } from '@/modules/sse/types';
-import type { RoomState } from '@/modules/room/types';
+import type { SSEEvent } from '@/features/realtime/events';
+import type { RoomState } from '@/features/room/types';
 import type {
   GameEndedPayload,
   LeaderboardPayload,
   QuestionPayload,
   RevealPayload,
-} from '@/modules/game/types';
+} from '@/features/game/types';
 
 /**
  * Connection status for the underlying `EventSource`.

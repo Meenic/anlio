@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ChevronRight } from 'lucide-react';
-import { ROOM_CODE_LENGTH } from '@/modules/room/constants';
+import { ROOM_CODE_LENGTH } from '@/features/room/constants';
 import {
   createRoomAction,
   joinRoomAction,
-} from '@/modules/room/server-actions';
+} from '@/features/home/actions.server';
 
 /**
  * Homepage Create-Room button. Single server-action roundtrip: session

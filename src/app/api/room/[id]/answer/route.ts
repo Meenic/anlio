@@ -1,7 +1,7 @@
-import { requireAuth, validateBody } from '@/lib/api/validate';
-import { withApiErrors } from '@/lib/api/with-api-errors';
-import { submitAnswer } from '@/modules/room/actions';
-import { AnswerSchema } from '../../schemas';
+import { requireAuth, validateBody } from '@/lib/http';
+import { withApiErrors } from '@/lib/http';
+import { submitAnswer } from '@/features/room/service';
+import { AnswerSchema } from '@/features/room/schemas';
 
 export async function POST(
   request: Request,

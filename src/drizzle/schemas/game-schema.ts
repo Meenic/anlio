@@ -1,5 +1,5 @@
 import { pgTable, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
-import type { Player, RoomSettings } from '@/modules/room/types';
+import type { Player, RoomSettings } from '@/features/room/types';
 
 export const gameResults = pgTable('game_results', {
   id: text('id').primaryKey(),

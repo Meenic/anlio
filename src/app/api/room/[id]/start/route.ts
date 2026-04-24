@@ -1,10 +1,10 @@
-import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { withApiErrors } from '@/lib/api/with-api-errors';
-import { getRoom } from '@/modules/room/store';
-import { startGame } from '@/modules/game/engine';
-import { getConnectedPlayers } from '@/modules/room/selectors';
-import { MIN_PLAYERS } from '@/modules/room/constants';
-import { StartGameSchema } from '../../schemas';
+import { jsonError, requireAuth, validateBody } from '@/lib/http';
+import { withApiErrors } from '@/lib/http';
+import { getRoom } from '@/features/room/store';
+import { startGame } from '@/features/game/engine';
+import { getConnectedPlayers } from '@/features/room/selectors';
+import { MIN_PLAYERS } from '@/features/room/constants';
+import { StartGameSchema } from '@/features/room/schemas';
 
 export async function POST(
   request: Request,

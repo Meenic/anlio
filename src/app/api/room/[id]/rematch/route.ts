@@ -1,12 +1,12 @@
-import { jsonError, requireAuth, validateBody } from '@/lib/api/validate';
-import { withApiErrors } from '@/lib/api/with-api-errors';
+import { jsonError, requireAuth, validateBody } from '@/lib/http';
+import { withApiErrors } from '@/lib/http';
 import {
   deleteQuestions,
   updateRoom,
   toPublicState,
-} from '@/modules/room/store';
-import { broadcast } from '@/modules/sse/broadcaster';
-import { RematchSchema } from '../../schemas';
+} from '@/features/room/store';
+import { broadcast } from '@/features/realtime/broadcaster';
+import { RematchSchema } from '@/features/room/schemas';
 
 /**
  * Reset a finished room back to the lobby so players can start a new game.

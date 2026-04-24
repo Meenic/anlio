@@ -1,14 +1,14 @@
 import { notFound, redirect } from 'next/navigation';
 import { headers } from 'next/headers';
-import { ROOM_CODE_LENGTH } from '@/modules/room/constants';
+import { ROOM_CODE_LENGTH } from '@/features/room/constants';
 import {
   getRoom,
   getRoomIdByCodeCached,
   toPublicState,
-} from '@/modules/room/store';
-import { auth } from '@/lib/auth';
-import type { RoomState } from '@/modules/room/types';
-import { RoomShell } from './components/room-shell';
+} from '@/features/room/store';
+import { auth } from '@/features/session/auth';
+import type { RoomState } from '@/features/room/types';
+import { RoomShell } from '@/components/room/room-shell';
 
 export default async function RoomPage({
   params,

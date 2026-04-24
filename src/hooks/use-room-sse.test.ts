@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, it, expect } from 'bun:test';
 import { applyEvent } from './use-room-sse';
-import type { RoomState, Player } from '@/modules/room/types';
+import type { RoomState, Player } from '@/features/room/types';
 
 function makePlayer(id: string, overrides: Partial<Player> = {}): Player {
   return {

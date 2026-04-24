@@ -1,7 +1,7 @@
-import { jsonOk, requireAuth, validateBody } from '@/lib/api/validate';
-import { withApiErrors } from '@/lib/api/with-api-errors';
-import { createRoom } from '@/modules/room/actions';
-import { CreateRoomSchema } from './schemas';
+import { jsonOk, requireAuth, validateBody } from '@/lib/http';
+import { withApiErrors } from '@/lib/http';
+import { createRoom } from '@/features/room/service';
+import { CreateRoomSchema } from '@/features/room/schemas';
 
 export async function POST(request: Request) {
   return withApiErrors(async () => {

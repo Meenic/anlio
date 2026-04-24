@@ -1,16 +1,16 @@
-import { registerClient, unregisterClient } from '@/modules/sse/registry';
-import { getRoom, toPublicState, tryUpdateRoom } from '@/modules/room/store';
-import { broadcast, pingClient, sendToPlayer } from '@/modules/sse/broadcaster';
+import { registerClient, unregisterClient } from '@/features/realtime/registry';
+import { getRoom, toPublicState, tryUpdateRoom } from '@/features/room/store';
 import {
-  HttpError,
-  httpErrorToResponse,
-  requireAuth,
-} from '@/lib/api/validate';
-import { countConnectedPlayers } from '@/modules/room/selectors';
+  broadcast,
+  pingClient,
+  sendToPlayer,
+} from '@/features/realtime/broadcaster';
+import { HttpError, httpErrorToResponse, requireAuth } from '@/lib/http';
+import { countConnectedPlayers } from '@/features/room/selectors';
 import {
   cancelOfflineRemovalTimer,
   scheduleOfflineRemovalTimer,
-} from '@/modules/sse/offline-removal';
+} from '@/features/realtime/offline-removal';
 
 /** Heartbeat interval in ms. Short enough to catch dead sockets quickly,
  *  long enough not to waste bandwidth. */
