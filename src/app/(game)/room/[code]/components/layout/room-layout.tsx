@@ -20,10 +20,12 @@ type RoomLayoutProps = {
 };
 
 /**
- * Persistent page-level shell that wraps every phase. Provides:
- *  - A hero header with phase title, room code pill, and live indicator.
- *  - A two-column grid: 220px violet player rail on the left, main content on the right.
- *  - On mobile the rail collapses into a drawer toggled from the header.
+ * Fixed-height page shell that wraps every phase.
+ *
+ * Uses `h-dvh` so the viewport height is always fully occupied — the player
+ * rail and main content always have the same height regardless of which phase
+ * is active. Each phase component is responsible for making itself `h-full`
+ * and handling its own internal overflow/scrolling.
  */
 export function RoomLayout({
   room,
@@ -35,12 +37,14 @@ export function RoomLayout({
   const [railOpen, setRailOpen] = useState(false);
 
   return (
-    <div className="min-h-dvh py-6">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 sm:px-6">
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col gap-4 px-4 py-4 sm:px-6 sm:py-6">
+        {/* Hero header — shrinks, does not scroll */}
         <HeaderBar room={room} sseStatus={sseStatus} />
 
-        <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-          {/* Desktop player rail */}
+        {/* Main grid — fills remaining height */}
+        <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+          {/* Desktop sidebar */}
           {sidebar ?? (
             <PlayerRail
               room={room}
@@ -49,7 +53,7 @@ export function RoomLayout({
             />
           )}
 
-          {/* Mobile player rail drawer */}
+          {/* Mobile player-rail drawer */}
           <AnimatePresence>
             {railOpen && (
               <>
@@ -82,14 +86,15 @@ export function RoomLayout({
             )}
           </AnimatePresence>
 
-          {/* Main content */}
+          {/* Phase content — animated on phase change, fills grid cell */}
           <AnimatePresence mode="wait">
             <motion.div
               key={room.phase}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: 0.18 }}
+              className="min-h-0"
             >
               {children}
             </motion.div>
@@ -97,7 +102,7 @@ export function RoomLayout({
         </div>
       </div>
 
-      {/* Mobile floating players button */}
+      {/* Mobile floating players toggle */}
       <Button
         type="button"
         size="icon"

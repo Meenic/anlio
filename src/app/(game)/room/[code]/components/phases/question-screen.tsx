@@ -13,7 +13,6 @@ import { CountdownBar } from './countdown-bar';
 type QuestionScreenProps = {
   room: RoomState;
   question: QuestionPayload;
-  /** Current number of players who've submitted an answer. */
   answerCount: number;
 };
 
@@ -29,7 +28,6 @@ export function QuestionScreen({
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset local state when the question changes (new round).
   useEffect(() => {
     setSelected(null);
     setSubmitting(false);
@@ -50,11 +48,7 @@ export function QuestionScreen({
     setSelected(optionId);
     setSubmitting(true);
     setError(null);
-
-    // Optimistically lock if the mode dictates it; otherwise allow changes
-    // until the phase ends.
     if (lockOnFirstSubmit) setLocked(true);
-
     try {
       const res = await fetch(`/api/room/${room.id}/answer`, {
         method: 'POST',
@@ -62,18 +56,16 @@ export function QuestionScreen({
         body: JSON.stringify({ optionId }),
       });
       if (!res.ok) {
-        // 409 already_answered — treat as a soft lock, not an error.
         if (res.status === 409) {
           setLocked(true);
         } else {
           throw new Error(
-            await parseApiError(res, `Couldn’t submit answer (${res.status})`)
+            await parseApiError(res, `Couldn't submit answer (${res.status})`)
           );
         }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
-      // Allow the user to retry if submission failed and mode permits it.
       if (!lockOnFirstSubmit) setLocked(false);
     } finally {
       setSubmitting(false);
@@ -85,98 +77,103 @@ export function QuestionScreen({
     room.settings.category.slice(1);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 p-4 sm:gap-6 sm:p-6">
-      {/* Progress dots */}
-      <ProgressDots current={question.index} total={question.total} />
-
-      {/* Top meta: answered count */}
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span className="font-medium">
-          Question {question.index + 1} / {question.total}
-        </span>
-        <span>
-          {answerCount} / {connectedCount} answered
-        </span>
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
+      {/* Pinned top bar: progress + meta + countdown */}
+      <div className="shrink-0 space-y-3 border-b border-border px-4 py-3 sm:px-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-muted-foreground">
+              Question
+            </p>
+            <ProgressDots current={question.index} total={question.total} />
+          </div>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {answerCount}/{connectedCount} answered
+          </span>
+        </div>
+        {room.phaseEndsAt !== null && (
+          <CountdownBar
+            phaseEndsAt={room.phaseEndsAt}
+            durationMs={durationMs}
+          />
+        )}
       </div>
 
-      {room.phaseEndsAt !== null && (
-        <CountdownBar phaseEndsAt={room.phaseEndsAt} durationMs={durationMs} />
-      )}
-
-      {/* Question prompt */}
-      <Card>
-        <CardContent className="flex min-h-32 flex-col items-center justify-center gap-3 p-6">
-          <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-primary">
-            {categoryLabel}
-          </span>
-          <motion.h2
-            key={question.question.id}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25 }}
-            className="text-center font-heading text-2xl font-semibold sm:text-3xl"
-          >
-            {question.question.text}
-          </motion.h2>
-        </CardContent>
-      </Card>
-
-      {error && (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
-
-      {/* Options grid */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {question.question.options.map((opt, i) => {
-          const isSelected = selected === opt.id;
-          return (
-            <Button
-              key={opt.id}
-              variant={isSelected ? 'default' : 'outline'}
-              size="lg"
-              disabled={locked && !isSelected}
-              onClick={() => submit(opt.id)}
-              className={cn(
-                'h-auto min-h-20 justify-start gap-4 whitespace-normal px-5 py-4 text-left text-base',
-                isSelected && 'ring-2 ring-primary ring-offset-2'
-              )}
+      {/* Scrollable body */}
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-5">
+        {/* Question card */}
+        <Card className="shrink-0">
+          <CardContent className="flex min-h-24 flex-col items-center justify-center gap-2 p-5">
+            <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-primary">
+              {categoryLabel}
+            </span>
+            <motion.h2
+              key={question.question.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+              className="text-center font-heading text-xl font-semibold sm:text-2xl"
             >
-              <span
+              {question.question.text}
+            </motion.h2>
+          </CardContent>
+        </Card>
+
+        {error && (
+          <p className="shrink-0 text-xs text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+
+        {/* Answer options */}
+        <div className="grid shrink-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
+          {question.question.options.map((opt, i) => {
+            const isSelected = selected === opt.id;
+            return (
+              <Button
+                key={opt.id}
+                variant={isSelected ? 'default' : 'outline'}
+                size="lg"
+                disabled={locked && !isSelected}
+                onClick={() => submit(opt.id)}
                 className={cn(
-                  'flex size-10 shrink-0 items-center justify-center rounded-full font-heading text-lg font-bold',
-                  isSelected
-                    ? 'bg-primary-foreground text-primary'
-                    : 'bg-secondary text-secondary-foreground'
+                  'h-auto min-h-16 justify-start gap-3 whitespace-normal px-4 py-3 text-left',
+                  isSelected && 'ring-2 ring-primary ring-offset-2'
                 )}
               >
-                {LETTERS[i]}
-              </span>
-              <span className="flex-1">{opt.text}</span>
-            </Button>
-          );
-        })}
+                <span
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-full font-heading text-sm font-bold',
+                    isSelected
+                      ? 'bg-primary-foreground text-primary'
+                      : 'bg-secondary text-secondary-foreground'
+                  )}
+                >
+                  {LETTERS[i]}
+                </span>
+                <span className="flex-1 text-sm">{opt.text}</span>
+              </Button>
+            );
+          })}
+        </div>
       </div>
 
-      <p className="text-center text-xs text-muted-foreground">
-        {lockOnFirstSubmit
-          ? 'Your first answer is locked in.'
-          : 'You can change your answer until the timer runs out.'}
-      </p>
+      {/* Pinned bottom hint */}
+      <div className="shrink-0 border-t border-border px-4 py-2.5 sm:px-5">
+        <p className="text-center text-[11px] text-muted-foreground">
+          {lockOnFirstSubmit
+            ? 'Your first answer is locked in.'
+            : 'You can change your answer until the timer runs out.'}
+        </p>
+      </div>
     </div>
   );
 }
 
-/**
- * Row of dots visualising question progress. Past questions are filled,
- * the current question is highlighted with the primary color, and future
- * questions are outlined.
- */
 function ProgressDots({ current, total }: { current: number; total: number }) {
   return (
     <div
-      className="flex items-center justify-center gap-1.5"
+      className="flex items-center gap-1"
       role="progressbar"
       aria-valuemin={1}
       aria-valuemax={total}
@@ -190,12 +187,12 @@ function ProgressDots({ current, total }: { current: number; total: number }) {
           <span
             key={i}
             className={cn(
-              'h-2 rounded-full transition-all',
+              'h-1.5 rounded-full transition-all duration-300',
               isCurrent
-                ? 'w-6 bg-primary'
+                ? 'w-5 bg-primary'
                 : isPast
-                  ? 'w-2 bg-muted-foreground/60'
-                  : 'w-2 bg-muted-foreground/20'
+                  ? 'w-1.5 bg-muted-foreground/60'
+                  : 'w-1.5 bg-muted-foreground/20'
             )}
           />
         );

@@ -24,9 +24,9 @@ export function Lobby({ room, selfId }: LobbyProps) {
   const isHost = room.hostId === selfId;
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card">
-      {/* Settings body */}
-      <div className="flex-1 px-5 py-6">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
+      {/* Scrollable settings body */}
+      <div className="flex-1 overflow-y-auto px-5 py-6">
         {isHost ? (
           <SettingsPanel roomId={room.id} settings={room.settings} />
         ) : (
@@ -34,8 +34,8 @@ export function Lobby({ room, selfId }: LobbyProps) {
         )}
       </div>
 
-      {/* Bottom action bar */}
-      <div className="border-t border-border px-5 py-4">
+      {/* Pinned action bar */}
+      <div className="shrink-0 border-t border-border px-5 py-4">
         <div className="flex items-stretch gap-3">
           <LeaveRoomButton roomId={room.id} />
           {isHost ? (
@@ -203,7 +203,6 @@ function ReadyButton({ room, selfId }: { room: RoomState; selfId: string }) {
 
   const self = room.players[selfId];
   const serverReady = self?.ready ?? false;
-  // When SSE confirms the flip, clear the optimistic value
   const currentlyReady = optimisticReady ?? serverReady;
   const isPending = optimisticReady !== null && optimisticReady !== serverReady;
 

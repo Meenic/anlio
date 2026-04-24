@@ -24,18 +24,18 @@ export function StartingScreen({ phaseEndsAt }: StartingScreenProps) {
   const label = remaining > 0 ? String(remaining) : 'GO!';
 
   return (
-    <div className="flex min-h-[70vh] flex-col items-center justify-center gap-6 p-6">
-      <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">
+    <div className="flex h-full flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border border-border bg-card">
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground">
         Game starting
       </p>
       <AnimatePresence mode="wait">
         <motion.div
           key={label}
-          initial={{ scale: 0.4, opacity: 0 }}
+          initial={{ scale: 0.5, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 1.6, opacity: 0 }}
+          exit={{ scale: 1.5, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-          className="select-none font-heading text-[10rem] font-bold leading-none text-primary sm:text-[14rem]"
+          className="select-none font-heading text-[8rem] font-bold leading-none text-primary sm:text-[11rem]"
         >
           {label}
         </motion.div>
